@@ -40,6 +40,7 @@ with tempfile.TemporaryDirectory() as temporary:
     import app
     app.ROOT = Path(temporary).resolve()
     app.STATE = Path(temporary + '/state.json')
+    app.playlist_name = lambda ident: 'Test Playlist <demo>'
     (Path(temporary) / 'Playlist').mkdir()
     (Path(temporary) / 'Playlist' / 'song.mp3').write_bytes(b'music')
     (Path(temporary) / 'escape').symlink_to('/etc')
@@ -96,6 +97,30 @@ with tempfile.TemporaryDirectory() as temporary:
     assert fetch('/submit', data).status == 200  # follows redirect
     assert MockWebhook.received == [{'url': 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M', 'playlistId': '37i9dQZF1DXcBWIGoYBM5M'}]
     assert app.read_runs()[0]['status'] == 'submitted'
+    assert app.read_runs()[0]['name'] == 'Test Playlist <demo>'
+    assert b'Test Playlist &lt;demo&gt;' in fetch('/').read()
+    assert b'1 item' in fetch('/').read()
+    app.save_runs([{'id': '37i9dQZF1DXcBWIGoYBM5M', 'url': 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M', 'submitted': '2026-09-30T00:00:00', 'status': 'submitted'}])
+    assert b'Test Playlist &lt;demo&gt;' in fetch('/').read()
+    assert app.read_runs()[0]['name'] == 'Test Playlist <demo>'
+    try:
+        fetch('/delete', urllib.parse.urlencode({'path': 'Playlist/song.mp3'}).encode(), origin='https://evil.example')
+        assert False
+    except urllib.error.HTTPError as error:
+        assert error.code == 403
+    for path in ('../outside', 'escape/passwd', ''):
+        try:
+            fetch('/delete', urllib.parse.urlencode({'path': path}).encode(), origin=base)
+            assert False
+        except urllib.error.HTTPError as error:
+            assert error.code == 400
+    fetch('/delete', urllib.parse.urlencode({'path': 'Playlist/song.mp3'}).encode(), origin=base)
+    assert not (Path(temporary) / 'Playlist' / 'song.mp3').exists()
+    (Path(temporary) / 'Playlist' / 'nested.txt').write_text('fixture')
+    fetch('/delete', urllib.parse.urlencode({'path': 'Playlist'}).encode(), origin=base)
+    assert not (Path(temporary) / 'Playlist').exists()
+    fetch('/clear-history', b'', origin=base)
+    assert app.read_runs() == []
     server.shutdown()
     webhook.shutdown()
     slskd.shutdown()
