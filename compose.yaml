@@ -1,0 +1,18 @@
+services:
+  playlist-desk:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ${COMPLETED_DOWNLOADS_HOST_PATH:?Set completed download host path}:/downloads:ro
+      - playlist_state:/state
+    networks:
+      - slskd
+volumes:
+  playlist_state:
+networks:
+  slskd:
+    external: true
+    name: ${SLSKD_DOCKER_NETWORK:?Set slskd Docker network}

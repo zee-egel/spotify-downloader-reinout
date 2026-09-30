@@ -1,0 +1,4 @@
+.env
+state.json
+downloads/
+__pycache__/
