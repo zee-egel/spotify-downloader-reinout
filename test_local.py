@@ -24,6 +24,17 @@ class MockWebhook(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+class MockSlskd(BaseHTTPRequestHandler):
+    def do_GET(self):
+        data = [{'directories': [{'directory': 'My Playlist', 'files': [{'filename': r'C:\\music\\Track <one>.mp3', 'state': 'Downloading', 'size': 1000, 'bytesTransferred': 500, 'averageSpeed': 100}]}]}]
+        body = json.dumps(data).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 with tempfile.TemporaryDirectory() as temporary:
     os.environ.update(APP_PASSWORD='secret', DOWNLOADS_ROOT=temporary, STATE_FILE=temporary + '/state.json')
     import app
@@ -35,6 +46,9 @@ with tempfile.TemporaryDirectory() as temporary:
     webhook = ThreadingHTTPServer(('127.0.0.1', 0), MockWebhook)
     threading.Thread(target=webhook.serve_forever, daemon=True).start()
     os.environ['N8N_WEBHOOK_URL'] = f'http://127.0.0.1:{webhook.server_port}/webhook'
+    slskd = ThreadingHTTPServer(('127.0.0.1', 0), MockSlskd)
+    threading.Thread(target=slskd.serve_forever, daemon=True).start()
+    os.environ['SLSKD_URL'] = f'http://127.0.0.1:{slskd.server_port}'
     server = ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f'http://127.0.0.1:{server.server_port}'
@@ -51,7 +65,11 @@ with tempfile.TemporaryDirectory() as temporary:
         assert False
     except urllib.error.HTTPError as error:
         assert error.code == 401
-    assert b'Playlist downloads.' in fetch('/').read()
+    dashboard = fetch('/').read()
+    assert b'Playlist downloads.' in dashboard
+    assert b'href="/#files"' in dashboard
+    assert b'aria-valuenow="50"' in dashboard
+    assert b'&lt;one&gt;' in fetch('/transfers').read()
     assert fetch('/file?path=Playlist/song.mp3').read() == b'music'
     with zipfile.ZipFile(io.BytesIO(fetch('/zip?path=Playlist').read())) as archive:
         assert archive.read('song.mp3') == b'music'
@@ -80,4 +98,5 @@ with tempfile.TemporaryDirectory() as temporary:
     assert app.read_runs()[0]['status'] == 'submitted'
     server.shutdown()
     webhook.shutdown()
+    slskd.shutdown()
 print('Local smoke checks passed')
