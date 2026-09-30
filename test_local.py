@@ -26,7 +26,7 @@ class MockWebhook(BaseHTTPRequestHandler):
 
 class MockSlskd(BaseHTTPRequestHandler):
     def do_GET(self):
-        data = [{'directories': [{'directory': 'My Playlist', 'files': [{'filename': r'C:\\music\\Track <one>.mp3', 'state': 'Downloading', 'size': 1000, 'bytesTransferred': 500, 'averageSpeed': 100}]}]}]
+        data = [{'username': 'fast-peer', 'directories': [{'directory': 'My Playlist', 'files': [{'batchId': 'new-batch', 'filename': r'C:\\music\\Track <one>.mp3', 'state': 'InProgress', 'size': 1000, 'bytesTransferred': 500, 'averageSpeed': 100}]}]}]
         body = json.dumps(data).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -36,7 +36,7 @@ class MockSlskd(BaseHTTPRequestHandler):
 
 
 with tempfile.TemporaryDirectory() as temporary:
-    os.environ.update(APP_PASSWORD='secret', DOWNLOADS_ROOT=temporary, STATE_FILE=temporary + '/state.json')
+    os.environ.update(APP_PASSWORD='secret', N8N_WEBHOOK_TOKEN='callback-secret', DOWNLOADS_ROOT=temporary, STATE_FILE=temporary + '/state.json')
     import app
     app.ROOT = Path(temporary).resolve()
     app.STATE = Path(temporary + '/state.json')
@@ -69,8 +69,13 @@ with tempfile.TemporaryDirectory() as temporary:
     dashboard = fetch('/').read()
     assert b'Playlist downloads.' in dashboard
     assert b'href="/#files"' in dashboard
-    assert b'aria-valuenow="50"' in dashboard
+    assert b'new EventSource' in dashboard
+    assert b'aria-valuenow="50"' in fetch('/transfers').read()
     assert b'&lt;one&gt;' in fetch('/transfers').read()
+    with fetch('/events') as events:
+        first = events.readline()
+        assert first.startswith(b'data: ')
+        assert json.loads(first[6:])['transfers'][0]['kind'] == 'downloading'
     assert fetch('/file?path=Playlist/song.mp3').read() == b'music'
     with zipfile.ZipFile(io.BytesIO(fetch('/zip?path=Playlist').read())) as archive:
         assert archive.read('song.mp3') == b'music'
@@ -95,11 +100,30 @@ with tempfile.TemporaryDirectory() as temporary:
         assert b'webhook credentials' in error.read()
     MockWebhook.status = 200
     assert fetch('/submit', data).status == 200  # follows redirect
-    assert MockWebhook.received == [{'url': 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M', 'playlistId': '37i9dQZF1DXcBWIGoYBM5M'}]
+    assert MockWebhook.received[0]['playlistId'] == '37i9dQZF1DXcBWIGoYBM5M'
+    assert len(MockWebhook.received[0]['submissionId']) == 32
     assert app.read_runs()[0]['status'] == 'submitted'
     assert app.read_runs()[0]['name'] == 'Test Playlist <demo>'
     assert b'Test Playlist &lt;demo&gt;' in fetch('/').read()
     assert b'1 item' in fetch('/').read()
+    callback = {'playlistId': app.read_runs()[0]['id'], 'submissionId': app.read_runs()[0]['submissionId'], 'phase': 'progress',
+                'state': {'totalSpotifyTracks': 1, 'downloads': [{'batchId': 'new-batch', 'artist': 'Artist', 'title': 'Track <one>', 'fallbackAttempted': True, 'fallbackSource': 'fast-peer', 'fallbackStatus': 'queued'}], 'problems': []}}
+    request = urllib.request.Request(base + '/workflow-status', json.dumps(callback).encode(), headers={'X-Playlist-Token': 'callback-secret', 'Content-Type': 'application/json'})
+    assert urllib.request.urlopen(request).status == 200
+    view = app.run_view(app.read_runs()[0], app.transfer_snapshot()[0])
+    assert view['counts']['downloading'] == 1 and view['counts']['fallback'] == 1
+    assert view['tracks'][0]['source'] == 'fast-peer'
+    complete = [dict(app.transfer_snapshot()[0][0], kind='completed'), {'batchId': 'old-batch', 'kind': 'failed'}]
+    assert app.run_view(app.read_runs()[0], complete)['counts']['failed'] == 0
+    callback['phase'] = 'queued'
+    urllib.request.urlopen(urllib.request.Request(base + '/workflow-status', json.dumps(callback).encode(), headers={'X-Playlist-Token': 'callback-secret'}))
+    assert app.read_runs()[0]['workflow']['phase'] == 'progress'
+    assert app.transfer_kind('Queued, Remotely') == 'queued remotely'
+    assert app.transfer_kind('Completed, Succeeded') == 'completed'
+    assert app.file_sort_key(Path(temporary) / 'Playlist' / 'song.mp3', 'size') == 5
+    (Path(temporary) / 'Playlist' / 'aaa.txt').write_bytes(b'x' * 10)
+    sorted_page = fetch('/?folder=Playlist&sort=size&dir=desc').read()
+    assert sorted_page.index(b'aaa.txt') < sorted_page.index(b'song.mp3')
     app.save_runs([{'id': '37i9dQZF1DXcBWIGoYBM5M', 'url': 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M', 'submitted': '2026-09-30T00:00:00', 'status': 'submitted'}])
     assert b'Test Playlist &lt;demo&gt;' in fetch('/').read()
     assert app.read_runs()[0]['name'] == 'Test Playlist <demo>'
