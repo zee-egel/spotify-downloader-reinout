@@ -70,6 +70,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert b'Playlist downloads.' in dashboard
     assert b'href="/#files"' in dashboard
     assert b'new EventSource' in dashboard
+    assert b'max-height:min(65vh,720px)' in dashboard
     assert b'aria-valuenow="50"' in fetch('/transfers').read()
     assert b'&lt;one&gt;' in fetch('/transfers').read()
     with fetch('/events') as events:
@@ -112,6 +113,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert urllib.request.urlopen(request).status == 200
     view = app.run_view(app.read_runs()[0], app.transfer_snapshot()[0])
     assert view['counts']['downloading'] == 1 and view['counts']['fallback'] == 1
+    assert view['tracks'][0]['batchId'] == 'new-batch'
     assert view['tracks'][0]['source'] == 'fast-peer'
     complete = [dict(app.transfer_snapshot()[0][0], kind='completed'), {'batchId': 'old-batch', 'kind': 'failed'}]
     assert app.run_view(app.read_runs()[0], complete)['counts']['failed'] == 0
