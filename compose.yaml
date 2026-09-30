@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8080"
     volumes:
       - ${COMPLETED_DOWNLOADS_HOST_PATH:?Set completed download host path}:/downloads
       - playlist_state:/state
