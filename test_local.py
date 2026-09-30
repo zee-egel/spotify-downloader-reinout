@@ -15,10 +15,12 @@ from pathlib import Path
 
 class MockWebhook(BaseHTTPRequestHandler):
     received = []
+    status = 200
 
     def do_POST(self):
-        self.received.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
-        self.send_response(200)
+        if self.status == 200:
+            self.received.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+        self.send_response(self.status)
         self.end_headers()
 
 
@@ -65,6 +67,14 @@ with tempfile.TemporaryDirectory() as temporary:
         assert False
     except urllib.error.HTTPError as error:
         assert error.code == 403
+    MockWebhook.status = 403
+    try:
+        fetch('/submit', data)
+        assert False
+    except urllib.error.HTTPError as error:
+        assert error.code == 502
+        assert b'webhook credentials' in error.read()
+    MockWebhook.status = 200
     assert fetch('/submit', data).status == 200  # follows redirect
     assert MockWebhook.received == [{'url': 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M', 'playlistId': '37i9dQZF1DXcBWIGoYBM5M'}]
     assert app.read_runs()[0]['status'] == 'submitted'

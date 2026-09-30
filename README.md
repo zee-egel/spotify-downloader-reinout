@@ -4,12 +4,12 @@ A small personal dashboard for Spotify playlist submissions, slskd transfers, an
 
 ## Deploy on the Pi
 
-1. Find the host path that backs slskd's **completed** downloads directory and the Docker network that reaches slskd. Check the actual Compose mounts; slskd's container path may differ from the host path.
-2. Copy `.env.example` to `.env`. Set `APP_PASSWORD` to a long random value, `COMPLETED_DOWNLOADS_HOST_PATH`, `SLSKD_DOCKER_NETWORK`, `SLSKD_API_KEY`, and `N8N_WEBHOOK_URL`. Keep `.env` private. Set `N8N_WEBHOOK_TOKEN` if the webhook requires a bearer token.
+1. Pull this repo. Copy `.env.example` to `.env` on the Pi and keep it private. Set `APP_PASSWORD`, `SLSKD_API_KEY`, `N8N_WEBHOOK_URL`, and `N8N_WEBHOOK_TOKEN`. The webhook URL and token were generated in the development machine's ignored `.env`; transfer those two values privately to the Pi. The webhook URL uses `http://n8n-n8n-1:5678` on the shared `n8n_default` Docker network.
+2. Confirm slskd stores completed files at `/downloads`, backed by `/home/admin/slskd/downloads`. The reported host mount and Docker network are prefilled in `.env.example`.
 3. Run `docker compose up -d --build`. Open `http://localhost:8080` through an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 pi`) or configure an authenticated HTTPS reverse proxy. The browser chooses where downloads land on your Mac.
 
-The n8n production webhook must accept `POST` JSON with `url` and `playlistId` and pass `url` into the existing Playlist Input path. The workflow must be active for a production webhook. Preserve the manual trigger as a second path. A successful webhook response is recorded as **submitted**, not completed; the current app cannot know execution outcome until the live workflow is inspected and wired for status updates.
+The n8n workflow `rxn40wQETIoCjwZj` now has an authenticated production POST webhook connected to `Playlist Input`, with the original manual URL retained only for manual runs. Its existing Spotify, search, scoring, and queue nodes were preserved. A successful webhook response is recorded as **submitted**, not completed.
 
-## Current integration status
+## Verification limits
 
-The local app and Compose template are ready for review. The reported slskd mount is `/home/admin/slskd/downloads:/downloads` and the shared Docker network is `n8n_default`; these values are filled into `.env.example`. Whether `/downloads` is slskd’s configured completed directory, the installed slskd API schema, n8n workflow, and public app URL remain unverified because Pi SSH authentication failed and Cloudflare returned 1010 for the n8n API request. Do not deploy with placeholder `.env` values. No playlist search or download was started during development.
+The workflow was fetched before and after the edit, and its active state and webhook authentication were verified through the n8n API. No real playlist search or download was started. Automatic approval review rejected a live webhook POST check because a misconfiguration could have triggered a playlist; this endpoint remains untested end to end. The app's local smoke checks pass with a mocked webhook and safe file fixtures (`python test_local.py`). Pi deployment, slskd's installed API response, and per-run outcome tracking remain unverified.
