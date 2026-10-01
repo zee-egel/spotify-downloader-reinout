@@ -16,10 +16,17 @@ from pathlib import Path
 class MockWebhook(BaseHTTPRequestHandler):
     received = []
     status = 200
+    callback_url = None
 
     def do_POST(self):
         if self.status == 200:
             self.received.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+            if self.callback_url:
+                submission = self.received[-1]
+                payload = dict(playlistId=submission['playlistId'], submissionId=submission['submissionId'], phase='queued',
+                               state={'totalSpotifyTracks': 1, 'downloads': [{'batchId': 'new-batch', 'artist': 'Artist', 'title': 'Early track'}]})
+                with urllib.request.urlopen(urllib.request.Request(self.callback_url, json.dumps(payload).encode(), headers={'X-Playlist-Token': 'callback-secret'})) as response:
+                    assert response.status == 200
         self.send_response(self.status)
         self.end_headers()
 
@@ -80,6 +87,22 @@ with tempfile.TemporaryDirectory() as temporary:
         first = events.readline()
         assert first.startswith(b'data: ')
         assert json.loads(first[6:])['transfers'][0]['kind'] == 'downloading'
+    # A changed filesystem must emit an event even when all transfers stay unchanged.
+    with fetch('/events?folder=Playlist&sort=name&dir=asc') as events:
+        first = json.loads(events.readline()[6:])
+        assert 'song.mp3' in first['library']['html']
+        arrived = Path(temporary) / 'Playlist' / 'arrived <new>.mp3'
+        arrived.write_bytes(b'new music')
+        while True:
+            line = events.readline()
+            if line.startswith(b'data: '):
+                update = json.loads(line[6:])
+                break
+        assert 'arrived &lt;new&gt;.mp3' in update['library']['html']
+        assert update['transfers'] == first['transfers']
+        arrived.unlink()
+    with fetch('/events?folder=../outside') as events:
+        assert json.loads(events.readline()[6:])['library']['error']
     assert fetch('/file?path=Playlist/song.mp3').read() == b'music'
     with zipfile.ZipFile(io.BytesIO(fetch('/zip?path=Playlist').read())) as archive:
         assert archive.read('song.mp3') == b'music'
@@ -102,19 +125,40 @@ with tempfile.TemporaryDirectory() as temporary:
     except urllib.error.HTTPError as error:
         assert error.code == 502
         assert b'webhook credentials' in error.read()
+    assert app.read_runs() == []  # Definite webhook rejection is not an import.
     MockWebhook.status = 200
+    MockWebhook.callback_url = base + '/workflow-status'
     assert fetch('/submit', data).status == 200  # follows redirect
     assert MockWebhook.received[0]['playlistId'] == '37i9dQZF1DXcBWIGoYBM5M'
     assert len(MockWebhook.received[0]['submissionId']) == 32
+    assert app.read_runs()[0]['workflow']['downloads'][0]['title'] == 'Early track'
     assert app.read_runs()[0]['status'] == 'submitted'
     assert app.read_runs()[0]['name'] == 'Test Playlist <demo>'
     assert b'Test Playlist \\u003cdemo>' in fetch('/').read()
     assert b'1 item' in fetch('/').read()
+    # Full metadata, then exact source selection, arrive before the batch callback.
+    def progress_update(state):
+        payload = {'playlistId': app.read_runs()[0]['id'], 'submissionId': app.read_runs()[0]['submissionId'], 'phase': 'queued', 'state': state}
+        req = urllib.request.Request(base + '/workflow-status', json.dumps(payload).encode(), headers={'X-Playlist-Token': 'callback-secret'})
+        with urllib.request.urlopen(req) as response:
+            assert response.status == 200
+    progress_update({'totalSpotifyTracks': 1, 'resolving': True, 'tracks': [{'spotifyId': 'track-1', 'artist': 'Artist', 'title': 'Track <one>', 'status': 'pending'}], 'downloads': []})
+    progress_update({'resolving': True, 'track': {'spotifyId': 'track-1', 'status': 'searching'}})
+    early = app.run_view(app.read_runs()[0], [])
+    assert early['total'] == 1 and early['tracks'][0]['status'] == 'searching'
+    files = app.transfer_snapshot()[0]
+    progress_update({'resolving': True, 'track': {'spotifyId': 'track-1', 'status': 'matching', 'username': 'fast-peer', 'filename': files[0]['filename']}})
+    early = app.run_view(app.read_runs()[0], files)
+    assert early['phase'] == 'resolving'
+    assert early['tracks'][0]['batchId'] == 'new-batch'  # Grouped before Queue Status.
+    assert early['tracks'][0]['status'] == 'downloading'
+    assert len(early['tracks']) == 1
     callback = {'playlistId': app.read_runs()[0]['id'], 'submissionId': app.read_runs()[0]['submissionId'], 'phase': 'progress',
                 'state': {'totalSpotifyTracks': 1, 'downloads': [{'batchId': 'new-batch', 'artist': 'Artist', 'title': 'Track <one>', 'fallbackAttempted': True, 'fallbackSource': 'fast-peer', 'fallbackStatus': 'queued'}], 'problems': []}}
     request = urllib.request.Request(base + '/workflow-status', json.dumps(callback).encode(), headers={'X-Playlist-Token': 'callback-secret', 'Content-Type': 'application/json'})
     assert urllib.request.urlopen(request).status == 200
     view = app.run_view(app.read_runs()[0], app.transfer_snapshot()[0])
+    assert len(view['tracks']) == 1 and view['phase'] == 'progress'
     assert view['counts']['downloading'] == 1 and view['counts']['fallback'] == 1
     assert view['tracks'][0]['batchId'] == 'new-batch'
     assert view['tracks'][0]['source'] == 'fast-peer'

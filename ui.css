@@ -736,3 +736,6 @@ kbd {
 }
 
 .more-tracks{display:block;margin:12px 0}
+
+#library-activity { margin: 0 0 32px; }
+#library-activity h2 { margin-bottom: 16px; }

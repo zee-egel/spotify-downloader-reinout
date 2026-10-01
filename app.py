@@ -111,7 +111,7 @@ def transfer_snapshot():
                 error = str(file.get('error') or file.get('failureReason') or '')
                 rows.append({'id': str(file.get('id') or ''), 'batchId': str(file.get('batchId') or ''),
                     'name': str(file.get('filename') or 'Unknown file').replace('\\', '/').split('/')[-1],
-                    'folder': str(group.get('directory') or ''), 'username': str(user.get('username') or ''),
+                    'filename': str(file.get('filename') or ''), 'folder': str(group.get('directory') or ''), 'username': str(user.get('username') or ''),
                     'state': state, 'kind': transfer_kind(raw_state, error), 'error': error,
                     'size': size, 'done': done, 'speed': speed, 'percent': max(0, min(100, percent)),
                     'date': str(file.get('requestedAt') or file.get('queuedAt') or file.get('startedAt') or ''), 'order': len(rows)})
@@ -123,28 +123,54 @@ def run_view(run, transfers):
     by_batch = {}
     for transfer in transfers:
         by_batch.setdefault(transfer['batchId'], []).append(transfer)
+    # Metadata arrives first; queue results and final summaries enrich the same tracks.
+    records = [dict(track) for track in state.get('tracks') or []]
+    by_id = {track['spotifyId']: track for track in records if track.get('spotifyId')}
+    by_url = {track['spotifyUrl']: track for track in records if track.get('spotifyUrl')}
+    by_title = {(track.get('artist'), track['title']): track for track in records if track.get('title')}
+    for key in ('downloads', 'problems'):
+        for result in state.get(key) or []:
+            existing = by_id.get(result['spotifyId']) if result.get('spotifyId') else by_url.get(result.get('spotifyUrl')) or by_title.get((result.get('artist'), result.get('title')))
+            if existing is None:
+                existing = {}
+                records.append(existing)
+            existing.update(result, problem=key == 'problems')
+            if existing.get('spotifyId'):
+                by_id[existing['spotifyId']] = existing
+            if existing.get('spotifyUrl'):
+                by_url[existing['spotifyUrl']] = existing
+            if existing.get('title'):
+                by_title[(existing.get('artist'), existing['title'])] = existing
     tracks = []
-    for download in state.get('downloads') or []:
-        files = by_batch.get(str(download.get('batchId') or ''), [])
+    by_file = {}
+    for transfer in transfers:
+        by_file.setdefault((transfer.get('username'), transfer.get('filename')), []).append(transfer)
+    for track in records:
+        batch = str(track.get('batchId') or '')
+        files = by_batch.get(batch, []) if batch else []
+        # An exact selected peer + filename is known before slskd assigns the batch ID.
+        if not batch and track.get('status') == 'matching':
+            files = by_file.get((track.get('username'), track.get('filename')), [])
+            files = [file for file in files if not file.get('date') or file['date'] >= (run.get('submitted') or '')]
         kinds = [file['kind'] for file in files]
-        status = next((kind for kind in ('completed', 'downloading', 'queued remotely', 'queued locally', 'failed') if kind in kinds), 'unknown')
-        if download.get('fallbackStatus') == 'queued' and status not in ('completed', 'failed'):
-            status = 'trying another source' if status == 'unknown' else status
-        tracks.append({'batchId': str(download.get('batchId') or ''), 'artist': download.get('artist') or '', 'title': download.get('title') or '',
-            'status': status, 'fallback': bool(download.get('fallbackAttempted')),
-            'source': download.get('fallbackSource') if download.get('fallbackAttempted') else next((f['username'] for f in files), ''),
+        status = track.get('status') or 'unknown'
+        status = {'error': 'search error', 'search_timeout': 'search timeout', 'queued': 'queued locally',
+                  'no_match': 'no match', 'review': 'needs review'}.get(status, status)
+        if not track.get('problem'):
+            status = next((kind for kind in ('completed', 'downloading', 'queued remotely', 'queued locally', 'failed') if kind in kinds), status)
+        if track.get('fallbackStatus') == 'queued' and status == 'unknown':
+            status = 'trying another source'
+        tracks.append({'batchId': batch or next((file['batchId'] for file in files), ''),
+            'spotifyId': track.get('spotifyId') or '', 'artist': track.get('artist') or '', 'title': track.get('title') or '',
+            'status': status, 'fallback': bool(track.get('fallbackAttempted')),
+            'source': track.get('fallbackSource') if track.get('fallbackAttempted') else next((f['username'] for f in files), track.get('username') or ''),
             'percent': max((file['percent'] for file in files), default=0)})
-    for problem in state.get('problems') or []:
-        status = problem.get('status') or 'unknown'
-        status = {'error': 'search error', 'search_timeout': 'search timeout'}.get(status, status)
-        tracks.append({'batchId': '', 'artist': problem.get('artist') or '', 'title': problem.get('title') or '',
-            'status': status, 'fallback': False, 'source': '', 'percent': 0})
     counts = {kind: sum(track['status'] == kind for track in tracks) for kind in ('completed', 'downloading', 'queued locally', 'queued remotely', 'failed', 'search timeout', 'search error', 'unknown')}
     counts['fallback'] = sum(track['fallback'] for track in tracks)
-    counts['no match'] = state.get('noMatch') or 0
-    counts['needs review'] = state.get('reviewRequired') or 0
-    return {'id': run.get('id'), 'submissionId': run.get('submissionId'), 'name': run.get('name'), 'submitted': run.get('submitted'),
-        'phase': state.get('phase') or 'submitted', 'total': state.get('totalSpotifyTracks'),
+    counts['no match'] = max(state.get('noMatch') or 0, sum(track['status'] == 'no match' for track in tracks))
+    counts['needs review'] = max(state.get('reviewRequired') or 0, sum(track['status'] == 'needs review' for track in tracks))
+    return {'id': run.get('id'), 'submissionId': run.get('submissionId'), 'name': state.get('playlistName') or run.get('name'), 'submitted': run.get('submitted'),
+        'phase': 'resolving' if state.get('resolving') else state.get('phase') or run.get('status') or 'submitted', 'total': state.get('totalSpotifyTracks'),
         'counts': counts, 'tracks': tracks}
 
 
@@ -179,6 +205,30 @@ def playlist_name(ident):
         return title.strip() if isinstance(title, str) and title.strip() else None
     except (urllib.error.URLError, ValueError, TimeoutError):
         return None
+
+
+def library_view(folder='', sort='name', direction='asc'):
+    sort = sort if sort in ('name', 'type', 'size', 'modified') else 'name'
+    direction = direction if direction in ('asc', 'desc') else 'asc'
+    sort_query = '&sort=' + sort + '&dir=' + direction
+    try:
+        directory = inside(folder)
+        if not directory.is_dir():
+            raise ValueError('Folder not found')
+        items = sorted((p for p in directory.iterdir() if p.resolve().is_relative_to(ROOT) and not p.is_symlink()), key=lambda p: file_sort_key(p, sort), reverse=direction == 'desc')
+        rows = []
+        for item in items:
+            rel = str(item.relative_to(ROOT))
+            quoted = urllib.parse.quote(rel)
+            delete = '<form class="inline-form" method="post" action="/delete" onsubmit="return confirm(\'Delete this item permanently?\')"><input type="hidden" name="path" value="' + html.escape(rel, quote=True) + '"><button class="danger" type="submit">Delete</button></form>'
+            if item.is_dir():
+                count = sum(1 for child in item.iterdir() if not child.is_symlink() and child.resolve().is_relative_to(ROOT))
+                rows.append(f'<div class="row library-row folder" data-path="{html.escape(rel, quote=True)}"><div><a class="filename" href="/?folder={quoted}{sort_query}#files"><span class="file-icon">▣</span><strong>{safe_name(item)}</strong></a><div class="muted">{count} item{"s" if count != 1 else ""} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/?folder={quoted}{sort_query}#files">Open</a><a class="link" href="/zip?path={quoted}">Download ZIP</a>{delete}</div></div>')
+            elif item.is_file():
+                rows.append(f'<div class="row library-row" data-path="{html.escape(rel, quote=True)}"><div><div class="filename"><span class="file-icon">♪</span><strong>{safe_name(item)}</strong></div><div class="muted">{size_label(item.stat().st_size)} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/file?path={quoted}">Download</a>{delete}</div></div>')
+        return {'html': ''.join(rows) or '<div class="empty">No files in this folder.</div>', 'error': None}
+    except (ValueError, OSError):
+        return {'html': None, 'error': 'This folder is unavailable. It may have moved or been removed.'}
 
 
 CSS = Path(__file__).with_name('ui.css').read_text()
@@ -282,15 +332,34 @@ class Handler(BaseHTTPRequestHandler):
             if os.environ.get('N8N_WEBHOOK_TOKEN'):
                 headers['Authorization'] = 'Bearer ' + os.environ['N8N_WEBHOOK_TOKEN']
             submission_id = uuid.uuid4().hex
+            with STATE_LOCK:
+                runs = read_runs()
+                runs.insert(0, {'id': ident, 'submissionId': submission_id, 'name': 'Spotify playlist ' + ident, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitting'})
+                save_runs(runs[:100])
             req = urllib.request.Request(webhook, json.dumps({'url': url, 'playlistId': ident, 'submissionId': submission_id}).encode(), headers)
-            with urllib.request.urlopen(req, timeout=15) as response:
-                if response.status >= 300:
-                    raise ValueError('Workflow rejected submission')
+            try:
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    if response.status >= 300:
+                        raise ValueError('Workflow rejected submission')
+            except (urllib.error.URLError, TimeoutError) as error:
+                # Keep uncertain submissions: the workflow may already be running.
+                with STATE_LOCK:
+                    runs = read_runs()
+                    if isinstance(error, urllib.error.HTTPError) and error.code in (400, 401, 403, 404):
+                        runs = [run for run in runs if run.get('submissionId') != submission_id]
+                    else:
+                        for run in runs:
+                            if run.get('submissionId') == submission_id:
+                                run['status'] = 'unconfirmed'
+                    save_runs(runs)
+                raise
             name = playlist_name(ident) or 'Spotify playlist ' + ident
             with STATE_LOCK:
                 runs = read_runs()
-                runs.insert(0, {'id': ident, 'submissionId': submission_id, 'name': name, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitted'})
-                save_runs(runs[:100])
+                for run in runs:
+                    if run.get('submissionId') == submission_id:
+                        run.update(name=name, status='submitted')
+                save_runs(runs)
             self.send_response(303)
             self.send_header('Location', '/')
             self.end_headers()
@@ -299,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
             message = 'n8n rejected the webhook credentials (403); check N8N_WEBHOOK_TOKEN' if error.code == 403 else f'n8n webhook returned HTTP {error.code}; check N8N_WEBHOOK_URL'
             self.send(page('<div class="error-page"><div class="error">The download service could not accept this playlist. Check the connection and try again.</div><details class="track-details"><summary>Technical details</summary>' + html.escape(message) + '</details><a href="/">Back to import</a></div>'), status=502)
         except (ValueError, urllib.error.URLError, TimeoutError) as error:
-            message = 'The download service could not be reached. Try again.' if isinstance(error, (urllib.error.URLError, TimeoutError)) else str(error)
+            message = 'Connection lost. Check recent imports before submitting again.' if isinstance(error, (urllib.error.URLError, TimeoutError)) else str(error)
             self.send(page('<div class="error">' + html.escape(message) + '</div><p><a href="/">Return to dashboard</a></p>'), status=400)
         except OSError as error:
             self.log_error('file operation failed: %s', error)
@@ -366,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get('Content-Length', '0'))
-            if not 0 < length <= 262144:
+            if not 0 < length <= 2 * 1024 * 1024:
                 raise ValueError('Invalid status size')
             payload = json.loads(self.rfile.read(length))
             ident = payload.get('playlistId') if isinstance(payload, dict) else None
@@ -374,7 +443,24 @@ class Handler(BaseHTTPRequestHandler):
             if not ident or not isinstance(payload.get('state'), dict):
                 raise ValueError('Invalid workflow status')
             state = payload['state']
-            clean = {key: state.get(key) for key in ('playlistName', 'totalSpotifyTracks', 'queuedDownloads', 'downloads', 'problems', 'completedFiles', 'failedFiles', 'pendingFiles', 'missingBatches', 'fallbackAttempts', 'timedOut', 'noMatch', 'reviewRequired', 'errors')}
+            clean = {key: state[key] for key in ('playlistName', 'totalSpotifyTracks', 'queuedDownloads', 'downloads', 'problems', 'completedFiles', 'failedFiles', 'pendingFiles', 'missingBatches', 'fallbackAttempts', 'timedOut', 'noMatch', 'reviewRequired', 'errors', 'resolving') if key in state}
+            def clean_track(track):
+                if not isinstance(track, dict) or not isinstance(track.get('spotifyId'), str) or not track['spotifyId']:
+                    raise ValueError('Invalid track update')
+                result = {}
+                for key in ('spotifyId', 'spotifyUrl', 'artist', 'title', 'status', 'username', 'filename', 'batchId'):
+                    if key in track:
+                        if track[key] is not None and not isinstance(track[key], str):
+                            raise ValueError('Invalid track field')
+                        result[key] = track[key] or ''
+                return result
+            if 'tracks' in state:
+                if not isinstance(state['tracks'], list):
+                    raise ValueError('Invalid tracks')
+                clean['tracks'] = [clean_track(track) for track in state['tracks']]
+            track_update = clean_track(state['track']) if 'track' in state else None
+            if 'downloads' in state:
+                clean['resolving'] = False
             clean['phase'] = payload.get('phase') if payload.get('phase') in ('queued', 'progress', 'final') else 'progress'
             with STATE_LOCK:
                 runs = read_runs()
@@ -382,8 +468,16 @@ class Handler(BaseHTTPRequestHandler):
                 if run:
                     phases = {'queued': 0, 'progress': 1, 'final': 2}
                     previous = run.get('workflow') or {}
-                    if phases[clean['phase']] >= phases.get(previous.get('phase'), -1) and (clean.get('fallbackAttempts') or 0) >= (previous.get('fallbackAttempts') or 0):
-                        run['workflow'] = clean
+                    if phases[clean['phase']] >= phases.get(previous.get('phase'), -1) and (clean.get('fallbackAttempts', previous.get('fallbackAttempts')) or 0) >= (previous.get('fallbackAttempts') or 0):
+                        if track_update:
+                            tracks = [dict(track) for track in previous.get('tracks') or []]
+                            matches = [track for track in tracks if track['spotifyId'] == track_update['spotifyId']]
+                            for track in matches:
+                                track.update(track_update)
+                            if not matches:
+                                tracks.append(track_update)
+                            clean['tracks'] = tracks
+                        run['workflow'] = {**previous, **clean}
                         save_runs(runs)
             self.send(b'{}', kind='application/json')
         except (ValueError, TypeError) as error:
@@ -408,11 +502,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        folder, sort, direction = (query.get(key, [default])[0] for key, default in (('folder', ''), ('sort', 'name'), ('dir', 'asc')))
         previous = None
         try:
             while True:
                 transfers, error = transfer_snapshot()
-                data = json.dumps({'transfers': transfers, 'runs': [run_view(run, transfers) for run in read_runs()[:8]], 'error': error}, ensure_ascii=False)
+                data = json.dumps({'transfers': transfers, 'runs': [run_view(run, transfers) for run in read_runs()[:8]], 'error': error, 'library': library_view(folder, sort, direction)}, ensure_ascii=False)
                 digest = hashlib.sha256(data.encode()).digest()
                 self.wfile.write(b'data: ' + data.encode() + b'\n\n' if digest != previous else b': keepalive\n\n')
                 self.wfile.flush()
@@ -429,29 +525,12 @@ class Handler(BaseHTTPRequestHandler):
         direction = query.get('dir', ['asc'])[0]
         direction = direction if direction in ('asc', 'desc') else 'asc'
         sort_query = '&sort=' + sort + '&dir=' + direction
-        try:
-            directory = inside(folder)
-            if not directory.is_dir():
-                raise ValueError('Folder not found')
-            items = sorted((p for p in directory.iterdir() if p.resolve().is_relative_to(ROOT) and not p.is_symlink()), key=lambda p: file_sort_key(p, sort), reverse=direction == 'desc')
-        except (ValueError, OSError):
-            self.send(page('<div class="error">Folder not found</div>'), status=404)
-            return
+        library = library_view(folder, sort, direction)
         crumbs = ['<a href="/?' + sort_query.lstrip('&') + '#files">Library</a>']
         current = Path()
         for part in Path(folder).parts if folder else []:
             current /= part
             crumbs.append('<span>›</span><a href="/?folder=' + urllib.parse.quote(str(current)) + sort_query + '#files">' + html.escape(part) + '</a>')
-        rows = []
-        for item in items:
-            rel = str(item.relative_to(ROOT))
-            quoted = urllib.parse.quote(rel)
-            delete = '<form class="inline-form" method="post" action="/delete" onsubmit="return confirm(\'Delete this item permanently?\')"><input type="hidden" name="path" value="' + html.escape(rel, quote=True) + '"><button class="danger" type="submit">Delete</button></form>'
-            if item.is_dir():
-                count = sum(1 for child in item.iterdir() if not child.is_symlink() and child.resolve().is_relative_to(ROOT))
-                rows.append(f'<div class="row library-row folder"><div><a class="filename" href="/?folder={quoted}{sort_query}#files"><span class="file-icon">▣</span><strong>{safe_name(item)}</strong></a><div class="muted">{count} item{"s" if count != 1 else ""} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/?folder={quoted}{sort_query}#files">Open</a><a class="link" href="/zip?path={quoted}">Download ZIP</a>{delete}</div></div>')
-            elif item.is_file():
-                rows.append(f'<div class="row library-row"><div><div class="filename"><span class="file-icon">♪</span><strong>{safe_name(item)}</strong></div><div class="muted">{size_label(item.stat().st_size)} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/file?path={quoted}">Download</a>{delete}</div></div>')
         runs = read_runs()[:8]
         missing = {(run['id'], run['submitted']): playlist_name(run['id']) or 'Spotify playlist ' + run['id'] for run in runs if not run.get('name')}
         if missing:
@@ -465,8 +544,8 @@ class Handler(BaseHTTPRequestHandler):
             runs = read_runs()[:8]
         body = '''<div data-view="start"><section class="import" id="start"><h1>Import a playlist</h1><form method="post" action="/submit" class="field" id="import-form"><input name="url" aria-label="Spotify playlist link" aria-describedby="import-hint import-feedback" placeholder="Paste a Spotify playlist link" autocomplete="off" spellcheck="false" required><button class="primary" type="submit">Import</button></form><div class="hint" id="import-hint">Spotify playlist links and URIs<kbd>⌘ / Ctrl K</kbd></div><div id="import-feedback" role="status"></div></section><section id="activity"><div class="sectionhead"><h2>Recent imports</h2><form id="clear-history" class="inline-form" method="post" action="/clear-history" onsubmit="return confirm('Clear import history? Downloaded files will be kept.')"><button class="danger" type="submit">Clear history</button></form></div><div class="list" id="run-list"></div></section></div>'''
         body += '''<section data-view="transfers" id="transfers"><h1>Downloads</h1><p class="queue-summary" id="queue-summary"></p><div class="notice" id="queue-notice" hidden><span id="queue-error"></span><button type="button" id="reconnect">Reconnect</button></div><div class="controls"><input id="transfer-search" type="search" placeholder="Search downloads" aria-label="Search downloads"><select id="transfer-status" aria-label="Filter download status"><option value="">All statuses</option><option value="downloading">Downloading</option><option value="queued">Queued</option><option value="failed">Failed</option><option value="completed">Complete</option><option value="unknown">Awaiting status</option></select><select id="transfer-sort" aria-label="Sort downloads"><option value="status">Active first</option><option value="newest">Newest first</option><option value="progress">Progress</option><option value="name">Name</option><option value="speed">Speed</option></select><button id="transfer-reverse" type="button" data-reverse="false" aria-pressed="false">Reverse order</button></div><div class="list" id="transfer-list"></div><button id="more-transfers" type="button" hidden>Show more</button></section>'''
-        body += '<section data-view="files" id="files"><div class="sectionhead"><div><h1 style="margin-bottom:0">Library</h1><div class="crumbs">' + ''.join(crumbs) + '</div></div><a class="link" href="' + html.escape(self.path.split('#')[0], quote=True) + '#files">Refresh</a></div><form class="controls" method="get" action="/#files"><input id="library-search" type="search" placeholder="Search this folder" aria-label="Search this folder"><input type="hidden" name="folder" value="' + html.escape(folder, quote=True) + '"><select id="file-sort" name="sort" aria-label="Sort files"><option value="name"' + (' selected' if sort == 'name' else '') + '>Name</option><option value="type"' + (' selected' if sort == 'type' else '') + '>Type</option><option value="size"' + (' selected' if sort == 'size' else '') + '>Size</option><option value="modified"' + (' selected' if sort == 'modified' else '') + '>Modified</option></select><select name="dir" aria-label="File sort direction"><option value="asc"' + (' selected' if direction == 'asc' else '') + '>Ascending</option><option value="desc"' + (' selected' if direction == 'desc' else '') + '>Descending</option></select><button type="submit">Sort</button></form><div class="list">' + (''.join(rows) or '<div class="empty">No files in this folder.</div>') + '</div><p id="library-no-match" class="empty" hidden>No files match your search.</p></section>'
-        initial = json.dumps({'runs': [run_view(run, []) for run in runs], 'transfers': [], 'error': None}).replace('<', '\\u003c')
+        body += '<section data-view="files" id="files"><div class="sectionhead"><div><h1 style="margin-bottom:0">Library</h1><div class="crumbs">' + ''.join(crumbs) + '</div></div><a class="link" href="' + html.escape(self.path.split('#')[0], quote=True) + '#files">Refresh</a></div><form class="controls" method="get" action="/#files"><input id="library-search" type="search" placeholder="Search this folder" aria-label="Search this folder"><input type="hidden" name="folder" value="' + html.escape(folder, quote=True) + '"><select id="file-sort" name="sort" aria-label="Sort files"><option value="name"' + (' selected' if sort == 'name' else '') + '>Name</option><option value="type"' + (' selected' if sort == 'type' else '') + '>Type</option><option value="size"' + (' selected' if sort == 'size' else '') + '>Size</option><option value="modified"' + (' selected' if sort == 'modified' else '') + '>Modified</option></select><select name="dir" aria-label="File sort direction"><option value="asc"' + (' selected' if direction == 'asc' else '') + '>Ascending</option><option value="desc"' + (' selected' if direction == 'desc' else '') + '>Descending</option></select><button type="submit">Sort</button></form><section class="section" id="library-activity"><h2>Download activity</h2><div id="library-transfers" class="list"></div><button type="button" id="more-library-transfers" hidden>Show more</button></section><div class="list" id="library-list">' + (library['html'] or '') + '</div><p id="library-error" class="error" role="status"></p><p id="library-no-match" class="empty" hidden>No files match your search.</p></section>'
+        initial = json.dumps({'runs': [run_view(run, []) for run in runs], 'transfers': [], 'error': None, 'library': library}).replace('<', '\\u003c')
         body += '<script type="application/json" id="initial-runs">' + initial + '</script>'
         body += '<script>' + LIVE_JS + '</script>'
         self.send(page(body))

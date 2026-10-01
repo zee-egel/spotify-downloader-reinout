@@ -17,6 +17,10 @@ const bytes = (n) => {
   return (i ? n.toFixed(1) : Math.round(n)) + " " + u[i];
 };
 const labels = {
+  pending: "Waiting to search",
+  searching: "Searching…",
+  matching: "Queueing…",
+  "already/duplicate": "Already queued",
   completed: "Complete",
   downloading: "Downloading",
   "queued locally": "Queued",
@@ -76,6 +80,9 @@ function replaceList(node, markup) {
   const focused = node.contains(document.activeElement)
     ? document.activeElement.closest("details[data-key]")?.dataset.key
     : null;
+  const active = node.contains(document.activeElement) ? document.activeElement : null;
+  const file = active?.closest('[data-path]')?.dataset.path;
+  const href = active?.getAttribute('href');
   const scroll = node.scrollTop;
   node.innerHTML = markup;
   node._markup = markup;
@@ -86,87 +93,25 @@ function replaceList(node, markup) {
       .find((el) => el.dataset.key === focused)
       ?.querySelector("summary")
       ?.focus({ preventScroll: true });
+  if (file) {
+    const row = [...node.querySelectorAll('[data-path]')].find(el => el.dataset.path === file);
+    [...(row?.querySelectorAll('a, button') || [])].find(el => el.tagName === active.tagName && el.getAttribute('href') === href)?.focus({preventScroll:true});
+  }
   node.scrollTop = scroll;
 }
-function renderTransfers() {
-  const query = controls.search.value.trim().toLowerCase(),
-    status = controls.status.value,
-    sort = controls.sort.value,
-    reverse = controls.reverse.dataset.reverse === "true";
-  let rows = snapshot.transfers.filter(
-    (t) =>
-      (!status ||
-        (status === "queued"
-          ? t.kind.includes("queued")
-          : t.kind === status)) &&
-      (!query ||
-        (t.name + " " + t.username + " " + t.folder)
-          .toLowerCase()
-          .includes(query)),
-  );
-  const order = {
-    downloading: 0,
-    "queued locally": 1,
-    "queued remotely": 2,
-    failed: 3,
-    unknown: 4,
-    completed: 5,
-  };
-  rows.sort((a, b) => {
-    let x =
-      sort === "status"
-        ? (order[a.kind] ?? 9) - (order[b.kind] ?? 9)
-        : sort === "progress"
-          ? a.percent - b.percent
-          : sort === "speed"
-            ? a.speed - b.speed
-            : sort === "newest"
-              ? String(b.date).localeCompare(String(a.date)) ||
-                a.order - b.order
-              : a.name.localeCompare(b.name);
-    return (reverse ? -1 : 1) * (x || a.name.localeCompare(b.name));
-  });
+function transferMarkup(rows) {
   const byBatch = new Map();
   for (const run of snapshot.runs)
     for (const t of run.tracks) if (t.batchId) byBatch.set(t.batchId, run);
   const groups = new Map();
-  for (const t of rows.slice(0, transferLimit)) {
+  for (const t of rows) {
     const run = byBatch.get(t.batchId),
       key = run ? run.submissionId || run.submitted || run.id : "other";
     if (!groups.has(key))
       groups.set(key, { name: run?.name || "Other downloads", rows: [] });
     groups.get(key).rows.push(t);
   }
-  const counts = [
-    "downloading",
-    "queued locally",
-    "queued remotely",
-    "failed",
-    "completed",
-  ]
-    .map((k) => {
-      const n = snapshot.transfers.filter((t) => t.kind === k).length;
-      return n
-        ? n +
-            " " +
-            {
-              downloading: "downloading",
-              "queued locally": "queued",
-              "queued remotely": "waiting for source",
-              failed: "failed",
-              completed: "complete",
-            }[k]
-        : "";
-    })
-    .filter(Boolean);
-  document.getElementById("queue-summary").textContent =
-    counts.join(" · ") || (receivedSnapshot ? "No downloads yet." : "Connecting…");
-  document.getElementById("queue-notice").hidden = !snapshot.error;
-  document.getElementById("queue-error").textContent = snapshot.error || "";
-  replaceList(
-    transferList,
-    groups.size
-      ? [...groups]
+  return [...groups]
           .map(
             ([key, g]) =>
               '<details class="transfer-group" data-key="' +
@@ -230,7 +175,76 @@ function renderTransfers() {
                 .join("") +
               "</details>",
           )
-          .join("")
+          .join("");
+}
+function renderTransfers() {
+  const query = controls.search.value.trim().toLowerCase(),
+    status = controls.status.value,
+    sort = controls.sort.value,
+    reverse = controls.reverse.dataset.reverse === "true";
+  let rows = snapshot.transfers.filter(
+    (t) =>
+      (!status ||
+        (status === "queued"
+          ? t.kind.includes("queued")
+          : t.kind === status)) &&
+      (!query ||
+        (t.name + " " + t.username + " " + t.folder)
+          .toLowerCase()
+          .includes(query)),
+  );
+  const order = {
+    downloading: 0,
+    "queued locally": 1,
+    "queued remotely": 2,
+    failed: 3,
+    unknown: 4,
+    completed: 5,
+  };
+  rows.sort((a, b) => {
+    let x =
+      sort === "status"
+        ? (order[a.kind] ?? 9) - (order[b.kind] ?? 9)
+        : sort === "progress"
+          ? a.percent - b.percent
+          : sort === "speed"
+            ? a.speed - b.speed
+            : sort === "newest"
+              ? String(b.date).localeCompare(String(a.date)) ||
+                a.order - b.order
+              : a.name.localeCompare(b.name);
+    return (reverse ? -1 : 1) * (x || a.name.localeCompare(b.name));
+  });
+  const counts = [
+    "downloading",
+    "queued locally",
+    "queued remotely",
+    "failed",
+    "completed",
+  ]
+    .map((k) => {
+      const n = snapshot.transfers.filter((t) => t.kind === k).length;
+      return n
+        ? n +
+            " " +
+            {
+              downloading: "downloading",
+              "queued locally": "queued",
+              "queued remotely": "waiting for source",
+              failed: "failed",
+              completed: "complete",
+            }[k]
+        : "";
+    })
+    .filter(Boolean);
+  document.getElementById("queue-summary").textContent =
+    counts.join(" · ") || (receivedSnapshot ? "No downloads yet." : "Connecting…");
+  document.getElementById("queue-notice").hidden = !snapshot.error;
+  document.getElementById("queue-error").textContent = snapshot.error || "";
+  replaceList(
+    transferList,
+    rows.length
+      ? transferMarkup(rows.slice(0, transferLimit))
       : '<div class="empty">' +
           (query || status
             ? "No downloads match your filters."
@@ -279,7 +293,9 @@ function renderRuns() {
                 ? "Complete"
                 : r.phase === "final"
                   ? "Finished"
-                  : r.phase === "submitted"
+                  : r.phase === "unconfirmed"
+                    ? "Awaiting confirmation"
+                    : ["submitted", "submitting", "resolving"].includes(r.phase)
                     ? "Resolving…"
                     : r.phase === "queued"
                       ? "Queued"
@@ -416,7 +432,13 @@ document.getElementById("more-transfers").addEventListener("click", () => {
   renderTransfers();
 });
 const librarySearch = document.getElementById("library-search");
-librarySearch.addEventListener("input", () => {
+let libraryLimit = 100;
+function renderLibrary() {
+  const library = snapshot.library;
+  if (library) {
+    replaceList(document.getElementById('library-list'), library.html || '');
+    document.getElementById('library-error').textContent = library.error || '';
+  }
   let count = 0;
   for (const row of document.querySelectorAll(".library-row")) {
     row.hidden = !row
@@ -427,7 +449,18 @@ librarySearch.addEventListener("input", () => {
   }
   document.getElementById("library-no-match").hidden =
     !!count || !librarySearch.value;
-});
+  const query = librarySearch.value.trim().toLowerCase();
+  const rows = snapshot.transfers.filter(t => !query || (t.name + ' ' + t.username).toLowerCase().includes(query));
+  rows.sort((a,b) => (a.kind === 'completed') - (b.kind === 'completed') || String(b.date).localeCompare(String(a.date)));
+  replaceList(document.getElementById('library-transfers'), transferMarkup(rows.slice(0, libraryLimit)));
+  document.getElementById('library-activity').hidden = !rows.length;
+  const more = document.getElementById('more-library-transfers');
+  more.hidden = rows.length <= libraryLimit;
+  more.textContent = 'Show more (' + Math.max(0, rows.length - libraryLimit) + ' remaining)';
+}
+librarySearch.addEventListener('input', () => { libraryLimit = 100; renderLibrary(); });
+document.getElementById('more-library-transfers').addEventListener('click', () => { libraryLimit += 100; renderLibrary(); });
+renderLibrary();
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
@@ -499,7 +532,7 @@ form.addEventListener("submit", async (e) => {
           "The playlist could not be imported. Try again.",
       );
     }
-    feedback.textContent = "Playlist submitted. Waiting for track information…";
+    feedback.textContent = "Playlist submitted.";
     input.value = "";
   } catch (error) {
     feedback.className = "error";
@@ -517,7 +550,7 @@ let stream;
 function connect() {
   document.getElementById("live-status").textContent = "Connecting…";
   stream?.close();
-  stream = new EventSource("/events");
+  stream = new EventSource("/events" + (location.search || ""));
   stream.onmessage = (e) => {
     try {
       snapshot = JSON.parse(e.data);
@@ -529,6 +562,7 @@ function connect() {
         (snapshot.error ? "Source offline" : "Connected");
       renderTransfers();
       renderRuns();
+      renderLibrary();
     } catch {
       document.getElementById("live-status").textContent =
         "Could not read update";

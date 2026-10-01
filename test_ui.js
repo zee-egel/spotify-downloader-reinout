@@ -119,4 +119,14 @@ assert.equal(
   (get("transfer-list").innerHTML.match(/<article/g) || []).length,
   150,
 );
+run("snapshot.library={html:'<div>Newly arrived file</div>',error:null};renderLibrary()");
+assert.ok(get('library-list').innerHTML.includes('Newly arrived file'));
+assert.ok(get('library-transfers').innerHTML.includes('aria-valuenow="50"'));
+// Library is independent of Downloads filters and handles completion live.
+get('transfer-search').value = 'does not match';
+run("snapshot.transfers=snapshot.transfers.slice(0,1);snapshot.transfers[0].kind='completed';snapshot.transfers[0].percent=100;renderLibrary()");
+assert.ok(get('library-transfers').innerHTML.includes('Complete'));
+run("snapshot.library={html:null,error:'Folder removed'};renderLibrary()");
+assert.equal(get('library-list').innerHTML, '');
+assert.equal(get('library-error').textContent, 'Folder removed');
 console.log("UI checks passed");
