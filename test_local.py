@@ -67,10 +67,13 @@ with tempfile.TemporaryDirectory() as temporary:
     except urllib.error.HTTPError as error:
         assert error.code == 401
     dashboard = fetch('/').read()
-    assert b'Playlist downloads.' in dashboard
+    assert b'Import a playlist' in dashboard
+    assert b'aria-label="Search this folder"' in dashboard
+    assert b'prefers-reduced-motion' in dashboard
+    assert b'data-view="transfers"' in dashboard
+    assert b'initial-runs' in dashboard
     assert b'href="/#files"' in dashboard
     assert b'new EventSource' in dashboard
-    assert b'max-height:min(65vh,720px)' in dashboard
     assert b'aria-valuenow="50"' in fetch('/transfers').read()
     assert b'&lt;one&gt;' in fetch('/transfers').read()
     with fetch('/events') as events:
@@ -105,7 +108,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert len(MockWebhook.received[0]['submissionId']) == 32
     assert app.read_runs()[0]['status'] == 'submitted'
     assert app.read_runs()[0]['name'] == 'Test Playlist <demo>'
-    assert b'Test Playlist &lt;demo&gt;' in fetch('/').read()
+    assert b'Test Playlist \\u003cdemo>' in fetch('/').read()
     assert b'1 item' in fetch('/').read()
     callback = {'playlistId': app.read_runs()[0]['id'], 'submissionId': app.read_runs()[0]['submissionId'], 'phase': 'progress',
                 'state': {'totalSpotifyTracks': 1, 'downloads': [{'batchId': 'new-batch', 'artist': 'Artist', 'title': 'Track <one>', 'fallbackAttempted': True, 'fallbackSource': 'fast-peer', 'fallbackStatus': 'queued'}], 'problems': []}}
@@ -117,6 +120,9 @@ with tempfile.TemporaryDirectory() as temporary:
     assert view['tracks'][0]['source'] == 'fast-peer'
     complete = [dict(app.transfer_snapshot()[0][0], kind='completed'), {'batchId': 'old-batch', 'kind': 'failed'}]
     assert app.run_view(app.read_runs()[0], complete)['counts']['failed'] == 0
+    problems = {'workflow': {'problems': [{'status': 'search_timeout'}, {'status': 'error'}]}}
+    problem_counts = app.run_view(problems, [])['counts']
+    assert (problem_counts['search timeout'], problem_counts['search error'], problem_counts['failed']) == (1, 1, 0)
     callback['phase'] = 'queued'
     urllib.request.urlopen(urllib.request.Request(base + '/workflow-status', json.dumps(callback).encode(), headers={'X-Playlist-Token': 'callback-secret'}))
     assert app.read_runs()[0]['workflow']['phase'] == 'progress'
@@ -127,7 +133,7 @@ with tempfile.TemporaryDirectory() as temporary:
     sorted_page = fetch('/?folder=Playlist&sort=size&dir=desc').read()
     assert sorted_page.index(b'aaa.txt') < sorted_page.index(b'song.mp3')
     app.save_runs([{'id': '37i9dQZF1DXcBWIGoYBM5M', 'url': 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M', 'submitted': '2026-09-30T00:00:00', 'status': 'submitted'}])
-    assert b'Test Playlist &lt;demo&gt;' in fetch('/').read()
+    assert b'Test Playlist \\u003cdemo>' in fetch('/').read()
     assert app.read_runs()[0]['name'] == 'Test Playlist <demo>'
     try:
         fetch('/delete', urllib.parse.urlencode({'path': 'Playlist/song.mp3'}).encode(), origin='https://evil.example')

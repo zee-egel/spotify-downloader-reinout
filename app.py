@@ -136,11 +136,10 @@ def run_view(run, transfers):
             'percent': max((file['percent'] for file in files), default=0)})
     for problem in state.get('problems') or []:
         status = problem.get('status') or 'unknown'
-        if status in ('error', 'search_timeout'):
-            status = 'failed'
+        status = {'error': 'search error', 'search_timeout': 'search timeout'}.get(status, status)
         tracks.append({'batchId': '', 'artist': problem.get('artist') or '', 'title': problem.get('title') or '',
             'status': status, 'fallback': False, 'source': '', 'percent': 0})
-    counts = {kind: sum(track['status'] == kind for track in tracks) for kind in ('completed', 'downloading', 'queued locally', 'queued remotely', 'failed', 'unknown')}
+    counts = {kind: sum(track['status'] == kind for track in tracks) for kind in ('completed', 'downloading', 'queued locally', 'queued remotely', 'failed', 'search timeout', 'search error', 'unknown')}
     counts['fallback'] = sum(track['fallback'] for track in tracks)
     counts['no match'] = state.get('noMatch') or 0
     counts['needs review'] = state.get('reviewRequired') or 0
@@ -182,62 +181,12 @@ def playlist_name(ident):
         return None
 
 
-CSS = """
-:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#202722;background:#f6f7f4;font-synthesis:none}
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0}button,input{font:inherit}a{color:inherit;text-decoration:none}a:hover{text-decoration:none;color:#1d6444}
-.shell{max-width:1120px;margin:auto;padding:0 28px 72px}.top{height:76px;display:flex;align-items:center;justify-content:space-between;gap:24px;border-bottom:1px solid #e1e6df}.brand{display:flex;gap:11px;align-items:center;font-weight:750;letter-spacing:-.04em;font-size:19px;white-space:nowrap}.mark{height:34px;width:34px;border-radius:10px;background:#1d5139;color:white;display:grid;place-items:center;font-size:18px}.nav{display:flex;align-items:center;gap:5px}.nav a{padding:9px 13px;color:#657069;font-size:13px;font-weight:650;border-radius:8px}.nav a:hover,.nav a:focus-visible{background:#e9eee8;color:#1d5139;outline:none}
-.hero{padding:49px 0 32px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.15em;color:#62806d;font-weight:800}.hero h1{font-size:clamp(34px,5vw,50px);letter-spacing:-.055em;line-height:1.1;margin:10px 0}.hero p{color:#68736b;margin:0;font-size:15px}.grid{display:grid;grid-template-columns:1.55fr .75fr;gap:18px}.card,.list{background:white;border:1px solid #e0e6df;border-radius:15px;box-shadow:0 2px 12px #172f2106}.card{padding:26px}.card h2{font-size:17px;letter-spacing:-.025em;margin:0 0 8px}.muted{color:#758077;font-size:13px;line-height:1.5}.field{display:flex;gap:9px;margin-top:22px}input{width:100%;min-width:0;border:1px solid #d8ded6;border-radius:9px;padding:12px 14px;outline:none;background:#fcfdfa;color:#202722}input:focus{border-color:#28734e;box-shadow:0 0 0 3px #28734e20}button{border:0;background:#205b40;color:white;border-radius:9px;padding:12px 17px;font-weight:650;white-space:nowrap;cursor:pointer}button:hover{background:#184b34}.hint{font-size:12px;color:#89948b;margin-top:10px}.stat{font-size:38px;letter-spacing:-.05em;font-weight:750;line-height:1;margin:26px 0 7px}.section{margin-top:38px;scroll-margin-top:20px}.sectionhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.sectionhead h2{font-size:21px;letter-spacing:-.035em;margin:0}.sectionhead .muted{margin:3px 0 0}.list{overflow:hidden}.row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 21px;border-top:1px solid #edf0ec}.row:first-child{border-top:0}.row>div:first-child{min-width:0}.row strong{display:block;font-size:14px;font-weight:650;overflow-wrap:anywhere}.row .muted{margin-top:5px}.right{display:flex;align-items:center;gap:16px;flex-shrink:0}.badge{border-radius:100px;padding:6px 10px;font-size:11px;font-weight:750;background:#eaf3ed;color:#276444;white-space:nowrap}.badge.waiting{background:#f5f0e5;color:#876b35}.badge.failed{background:#faecea;color:#9c4b43}.empty{padding:38px 22px;color:#87928a;text-align:center;font-size:14px}.link{font-size:12px;font-weight:700;color:#256242;white-space:nowrap}.error{background:#fff0ed;color:#a0443c;border-radius:9px;padding:12px 14px;margin:15px 0}.crumbs{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:#77837a;font-size:13px}.crumbs a{color:#286344;font-weight:650}.transfer{display:block}.transfer-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.transfer .muted{margin-top:5px}.progress{height:7px;background:#e9eee9;border-radius:99px;overflow:hidden;margin-top:15px}.progress span{display:block;height:100%;background:#2e7953;border-radius:99px}.transfer-bottom{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:8px;color:#78837a;font-size:12px}.refresh{font-size:12px;color:#89948b}.file-icon{display:inline-grid;place-items:center;width:29px;height:29px;margin-right:8px;border-radius:8px;background:#edf3ee;color:#3b7051;font-size:14px}.filename{display:flex;align-items:center}.filename strong{display:inline}
-.danger{background:transparent;color:#a54b45;padding:6px 2px;font-size:12px;font-weight:700}.danger:hover{background:transparent;color:#7e342f;text-decoration:underline}.count{color:#8a958d;font-weight:500;font-size:12px}.inline-form{display:inline;margin:0}
-.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}.controls input{max-width:240px}.controls select{font:inherit;color:#26332a;background:#fff;border:1px solid #d8ded6;border-radius:9px;padding:10px;min-height:43px}.controls button{padding:10px 12px}.track-list{border-top:1px solid #edf0ec;padding:8px 21px 16px}.track-row{display:flex;justify-content:space-between;gap:14px;padding:8px 0;font-size:13px}.track-row span:last-child{color:#657069;white-space:nowrap}.run-details{width:100%;margin-top:10px}.run-details summary{cursor:pointer;color:#256242;font-size:12px;font-weight:700}.run-counts{font-size:12px;color:#657069;margin-top:5px}.live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#2e7953;margin-right:6px}.live-dot.offline{background:#a54b45}
-#transfer-list{max-height:min(65vh,720px);overflow-y:auto;overscroll-behavior:contain}.transfer-group{border-top:1px solid #edf0ec}.transfer-group:first-child{border-top:0}.transfer-group>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:15px 20px;cursor:pointer;font-size:14px;font-weight:700;list-style:none;background:#fff}.transfer-group>summary::-webkit-details-marker{display:none}.transfer-group>summary:before{content:'›';font-size:20px;line-height:1;color:#67766b;transition:transform .15s}.transfer-group[open]>summary:before{transform:rotate(90deg)}.transfer-group>summary span:first-of-type{flex:1;overflow-wrap:anywhere}.transfer-group>summary .count{white-space:nowrap}.transfer-group>summary:focus-visible{outline:2px solid #28734e;outline-offset:-3px}.transfer-group .row{border-top:1px solid #edf0ec}
-@media(max-width:720px){.shell{padding:0 17px 42px}.top{height:auto;min-height:72px;align-items:flex-start;flex-wrap:wrap;padding:16px 0}.nav{width:100%;overflow:auto}.nav a{padding:8px 10px}.hero{padding:35px 0 27px}.grid{grid-template-columns:1fr}.card{padding:22px}.field{flex-direction:column}.row{padding:15px;align-items:flex-start}.right{gap:10px;flex-wrap:wrap;justify-content:flex-end}.transfer-top{align-items:flex-start}.section{margin-top:31px}}
-"""
-
-LIVE_JS = r"""
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const bytes=n=>{let u=['B','KB','MB','GB','TB'],i=0;n=Number(n)||0;while(n>=1024&&i<4){n/=1024;i++}return (i?n.toFixed(1):Math.round(n))+' '+u[i]};
-let snapshot={transfers:[],runs:[],error:null};
-const controls={search:document.getElementById('transfer-search'),status:document.getElementById('transfer-status'),sort:document.getElementById('transfer-sort'),reverse:document.getElementById('transfer-reverse')};
-const transferList=document.getElementById('transfer-list'),groupOpen=new Map();
-transferList.addEventListener('click',e=>{const summary=e.target.closest('summary');if(summary&&transferList.contains(summary))groupOpen.set(summary.parentElement.dataset.key,!summary.parentElement.open)});
-function renderTransfers(){
-  const query=controls.search.value.trim().toLowerCase(),status=controls.status.value,sort=controls.sort.value,reverse=controls.reverse.dataset.reverse==='true';
-  let rows=snapshot.transfers.filter(t=>(!status||t.kind===status)&&(!query||(t.name+' '+t.username+' '+t.folder).toLowerCase().includes(query)));
-  const order={'completed':0,'downloading':1,'queued locally':2,'queued remotely':3,'failed':4,'unknown':5};
-  rows.sort((a,b)=>{let x=sort==='status'?(order[a.kind]??9)-(order[b.kind]??9):sort==='progress'?a.percent-b.percent:sort==='speed'?a.speed-b.speed:sort==='newest'?(a.date&&b.date?String(a.date).localeCompare(String(b.date))||b.order-a.order:b.order-a.order):a.name.localeCompare(b.name);return (reverse?-1:1)*(x||a.name.localeCompare(b.name))});
-  const runByBatch=new Map();
-  for(const run of snapshot.runs||[])for(const track of run.tracks)if(track.batchId)runByBatch.set(track.batchId,run);
-  const groups=new Map();
-  for(const t of rows){const run=runByBatch.get(t.batchId),key=run?(run.submissionId||run.submitted||run.id):'other';if(!groups.has(key))groups.set(key,{name:run?.name||'Other transfers',rows:[]});groups.get(key).rows.push(t)}
-  const focused=document.activeElement?.closest('#transfer-list summary')?.parentElement?.dataset.key,scroll=transferList.scrollTop;
-  transferList.innerHTML=snapshot.error?'<div class="empty">'+esc(snapshot.error)+'</div>':groups.size?[...groups].map(([key,group])=>'<details class="transfer-group" data-key="'+esc(key)+'" '+(groupOpen.get(key)===false?'':'open')+'><summary><span>'+esc(group.name)+'</span><span class="count">'+group.rows.length+' transfer'+(group.rows.length===1?'':'s')+'</span></summary>'+group.rows.map(t=>{
-    const active=(snapshot.runs||[]).some(r=>r.tracks.some(track=>track.fallback&&track.source===t.username&&track.title&&t.name.toLowerCase().includes(track.title.toLowerCase())));
-    const label=active&&t.kind!=='completed'?'Trying another source · '+t.state:t.state;
-    return '<div class="row transfer"><div class="transfer-top"><div><strong>'+esc(t.name)+'</strong><div class="muted">'+esc(t.username)+' · '+esc(t.folder)+'</div></div><span class="badge '+(t.kind==='failed'?'failed':t.kind.includes('queued')?'waiting':'')+'">'+esc(label)+'</span></div><div class="progress" role="progressbar" aria-label="'+esc(t.name)+'" aria-valuenow="'+Math.round(t.percent)+'" aria-valuemin="0" aria-valuemax="100"><span style="width:'+t.percent+'%"></span></div><div class="transfer-bottom"><span>'+bytes(t.done)+' of '+bytes(t.size)+(t.speed?' · '+bytes(t.speed)+'/s':'')+(t.error?' · '+esc(t.error):'')+'</span><strong>'+Math.round(t.percent)+'%</strong></div></div>'
-  }).join('')+'</details>').join(''):'<div class="empty">No matching transfers.</div>';
-  transferList.scrollTop=scroll;
-  if(focused)[...transferList.querySelectorAll('details')].find(group=>group.dataset.key===focused)?.querySelector('summary')?.focus({preventScroll:true});
-}
-function renderRuns(){
-  const list=document.getElementById('run-list'),open=new Set([...list.querySelectorAll('details[open]')].map(x=>x.dataset.id));
-  list.innerHTML=snapshot.runs.length?snapshot.runs.map((r,i)=>{
-    const c=r.counts,total=r.total==null?'Unknown total':r.total+' tracks';
-    const counts=['completed','downloading','queued locally','queued remotely','failed','unknown','no match','needs review'].map(k=>c[k]+' '+k).join(' · ');
-    const tracks=r.tracks.map(t=>'<div class="track-row"><span>'+esc((t.artist?t.artist+' — ':'')+t.title)+'</span><span>'+esc(t.fallback&&t.status!=='completed'?'Trying another source · '+t.status:t.status)+'</span></div>').join('');
-    const key=esc(r.submissionId||r.submitted||i);
-    return '<div class="row"><div style="width:100%"><strong>'+esc(r.name||'Spotify playlist '+r.id)+'</strong><div class="muted">'+esc((r.submitted||'').slice(0,16).replace('T',' '))+' UTC · '+esc(r.phase)+'</div><div class="run-counts">'+esc(total)+' · '+esc(counts)+' · '+c.fallback+' alternate attempted</div><details class="run-details" data-id="'+key+'" '+(open.has(key)?'open':'')+'><summary>View tracks</summary><div class="track-list">'+(tracks||'<div class="muted">Track details are not available yet.</div>')+'</div></details></div></div>'
-  }).join(''):'<div class="empty">No playlists submitted yet.</div>';
-}
-for(const control of [controls.search,controls.status,controls.sort])control.addEventListener(control===controls.search?'input':'change',renderTransfers);
-controls.reverse.addEventListener('click',()=>{let reverse=controls.reverse.dataset.reverse!=='true';controls.reverse.dataset.reverse=String(reverse);controls.reverse.textContent=reverse?'Descending':'Ascending';renderTransfers()});
-const stream=new EventSource('/events');
-stream.onmessage=e=>{snapshot=JSON.parse(e.data);document.getElementById('live-status').innerHTML='<span class="live-dot"></span>Live';renderTransfers();renderRuns()};
-stream.onerror=()=>{document.getElementById('live-status').innerHTML='<span class="live-dot offline"></span>Reconnecting…'};
-"""
+CSS = Path(__file__).with_name('ui.css').read_text()
+LIVE_JS = Path(__file__).with_name('ui.js').read_text()
 
 
 def page(body, title='Playlist desk'):
-    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title><style>{CSS}</style><div class="shell"><header class="top"><a class="brand" href="/"><span class="mark">♪</span>Playlist desk</a><nav class="nav" aria-label="Main navigation"><a href="/#start">Start</a><a href="/#activity">Activity</a><a href="/#transfers">Transfers</a><a href="/#files">Files</a></nav></header>{body}</div></html>'''.encode()
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>{html.escape(title)}</title><style>{CSS}</style></head><body><a class="skip" href="#main">Skip to content</a><div class="shell"><header class="top"><a class="brand" href="/"><span class="mark" aria-hidden="true">♫</span>Playlist desk</a><nav class="nav" aria-label="Main navigation"><a href="/#start">Import</a><a href="/#transfers">Downloads</a><a href="/#files">Library</a></nav><span class="connection" id="live-status" role="status"></span></header><main id="main" tabindex="-1">{body}</main></div></body></html>'''.encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -328,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Enter a Spotify playlist URL or URI')
             webhook = os.environ.get('N8N_WEBHOOK_URL', '')
             if not webhook:
-                raise ValueError('N8N_WEBHOOK_URL is not configured')
+                raise ValueError('The download service is not configured yet.')
             headers = {'Content-Type': 'application/json'}
             if os.environ.get('N8N_WEBHOOK_TOKEN'):
                 headers['Authorization'] = 'Bearer ' + os.environ['N8N_WEBHOOK_TOKEN']
@@ -348,9 +297,10 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as error:
             self.log_error('n8n webhook returned HTTP %d', error.code)
             message = 'n8n rejected the webhook credentials (403); check N8N_WEBHOOK_TOKEN' if error.code == 403 else f'n8n webhook returned HTTP {error.code}; check N8N_WEBHOOK_URL'
-            self.send(page('<div class="error">' + html.escape(message) + '</div><p><a href="/">Return to dashboard</a></p>'), status=502)
+            self.send(page('<div class="error-page"><div class="error">The download service could not accept this playlist. Check the connection and try again.</div><details class="track-details"><summary>Technical details</summary>' + html.escape(message) + '</details><a href="/">Back to import</a></div>'), status=502)
         except (ValueError, urllib.error.URLError, TimeoutError) as error:
-            self.send(page('<div class="error">' + html.escape(str(error)) + '</div><p><a href="/">Return to dashboard</a></p>'), status=400)
+            message = 'The download service could not be reached. Try again.' if isinstance(error, (urllib.error.URLError, TimeoutError)) else str(error)
+            self.send(page('<div class="error">' + html.escape(message) + '</div><p><a href="/">Return to dashboard</a></p>'), status=400)
         except OSError as error:
             self.log_error('file operation failed: %s', error)
             self.send(page('<div class="error">Could not delete this item; check the downloads directory permissions.</div><p><a href="/">Return to dashboard</a></p>'), status=500)
@@ -487,7 +437,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError):
             self.send(page('<div class="error">Folder not found</div>'), status=404)
             return
-        crumbs = ['<a href="/?' + sort_query.lstrip('&') + '#files">Downloads</a>']
+        crumbs = ['<a href="/?' + sort_query.lstrip('&') + '#files">Library</a>']
         current = Path()
         for part in Path(folder).parts if folder else []:
             current /= part
@@ -499,9 +449,9 @@ class Handler(BaseHTTPRequestHandler):
             delete = '<form class="inline-form" method="post" action="/delete" onsubmit="return confirm(\'Delete this item permanently?\')"><input type="hidden" name="path" value="' + html.escape(rel, quote=True) + '"><button class="danger" type="submit">Delete</button></form>'
             if item.is_dir():
                 count = sum(1 for child in item.iterdir() if not child.is_symlink() and child.resolve().is_relative_to(ROOT))
-                rows.append(f'<div class="row"><div><a class="filename" href="/?folder={quoted}{sort_query}#files"><span class="file-icon">▣</span><strong>{safe_name(item)}</strong></a><div class="muted">{count} item{"s" if count != 1 else ""} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/?folder={quoted}{sort_query}#files">Open</a><a class="link" href="/zip?path={quoted}">Download ZIP</a>{delete}</div></div>')
+                rows.append(f'<div class="row library-row folder"><div><a class="filename" href="/?folder={quoted}{sort_query}#files"><span class="file-icon">▣</span><strong>{safe_name(item)}</strong></a><div class="muted">{count} item{"s" if count != 1 else ""} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/?folder={quoted}{sort_query}#files">Open</a><a class="link" href="/zip?path={quoted}">Download ZIP</a>{delete}</div></div>')
             elif item.is_file():
-                rows.append(f'<div class="row"><div><div class="filename"><span class="file-icon">♪</span><strong>{safe_name(item)}</strong></div><div class="muted">{size_label(item.stat().st_size)} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/file?path={quoted}">Download</a>{delete}</div></div>')
+                rows.append(f'<div class="row library-row"><div><div class="filename"><span class="file-icon">♪</span><strong>{safe_name(item)}</strong></div><div class="muted">{size_label(item.stat().st_size)} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/file?path={quoted}">Download</a>{delete}</div></div>')
         runs = read_runs()[:8]
         missing = {(run['id'], run['submitted']): playlist_name(run['id']) or 'Spotify playlist ' + run['id'] for run in runs if not run.get('name')}
         if missing:
@@ -513,13 +463,11 @@ class Handler(BaseHTTPRequestHandler):
                         run['name'] = missing[key]
                 save_runs(saved)
             runs = read_runs()[:8]
-        runrows = []
-        for run in runs:
-            runrows.append(f'<div class="row"><div><strong>{html.escape(run.get("name") or "Spotify playlist " + run["id"])}</strong><div class="muted">Submitted {html.escape(run["submitted"][:16].replace("T", " "))} UTC</div></div><span class="badge waiting">Submitted</span></div>')
-        body = f'''<section class="hero" id="start"><div class="eyebrow">Personal music library</div><h1>Playlist downloads.</h1><p>Submit a playlist, follow transfers, and collect finished files.</p></section><div class="grid"><section class="card"><h2>New playlist</h2><div class="muted">Paste a Spotify playlist link to start processing.</div><form method="post" action="/submit" class="field"><input name="url" aria-label="Spotify playlist URL" placeholder="https://open.spotify.com/playlist/..." required><button type="submit">Submit playlist</button></form><div class="hint">Spotify playlist URLs and URIs are supported.</div></section><section class="card"><h2>Completed files</h2><div class="muted">Browse or download what is already on the Pi.</div><div class="stat">{len(items)}</div><div class="muted">items in this folder</div></section></div>'''
-        body += '<section class="section" id="activity"><div class="sectionhead"><div><h2>Recent submissions</h2><p class="muted">Workflow and download status.</p></div><form class="inline-form" method="post" action="/clear-history" onsubmit="return confirm(\'Clear recent submissions? This will not delete downloaded files.\')"><button class="danger" type="submit">Clear history</button></form></div><div class="list" id="run-list">' + (''.join(runrows) or '<div class="empty">No playlists submitted yet.</div>') + '</div></section>'
-        body += '<section class="section" id="transfers"><div class="sectionhead"><div><h2>Transfers</h2><p class="muted">Live download progress from slskd.</p></div><span class="refresh" id="live-status" aria-live="polite">Connecting…</span></div><div class="controls"><input id="transfer-search" type="search" placeholder="Search transfers" aria-label="Search transfers"><select id="transfer-status" aria-label="Filter transfer status"><option value="">All statuses</option><option>completed</option><option>downloading</option><option>queued locally</option><option>queued remotely</option><option>failed</option><option>unknown</option></select><select id="transfer-sort" aria-label="Sort transfers"><option value="newest">Newest</option><option value="status">Status</option><option value="progress">Progress</option><option value="name">Name</option><option value="speed">Speed</option></select><button id="transfer-reverse" type="button" data-reverse="true">Descending</button></div><div class="list" id="transfer-list"><div class="empty">Connecting to slskd…</div></div></section>'
-        body += '<section class="section" id="files"><div class="sectionhead"><div><h2>Completed downloads</h2><div class="crumbs">' + ''.join(crumbs) + '</div></div><a class="link" href="' + html.escape(self.path, quote=True) + '#files">Refresh files</a></div><form class="controls" method="get" action="/"><input type="hidden" name="folder" value="' + html.escape(folder, quote=True) + '"><label for="file-sort">Sort files</label><select id="file-sort" name="sort"><option value="name"' + (' selected' if sort == 'name' else '') + '>Name</option><option value="type"' + (' selected' if sort == 'type' else '') + '>Type</option><option value="size"' + (' selected' if sort == 'size' else '') + '>Size</option><option value="modified"' + (' selected' if sort == 'modified' else '') + '>Modified</option></select><select name="dir" aria-label="File sort direction"><option value="asc"' + (' selected' if direction == 'asc' else '') + '>Ascending</option><option value="desc"' + (' selected' if direction == 'desc' else '') + '>Descending</option></select><button type="submit">Apply</button></form><div class="list">' + (''.join(rows) or '<div class="empty">No completed files here yet.</div>') + '</div></section>'
+        body = '''<div data-view="start"><section class="import" id="start"><h1>Import a playlist</h1><form method="post" action="/submit" class="field" id="import-form"><input name="url" aria-label="Spotify playlist link" aria-describedby="import-hint import-feedback" placeholder="Paste a Spotify playlist link" autocomplete="off" spellcheck="false" required><button class="primary" type="submit">Import</button></form><div class="hint" id="import-hint">Spotify playlist links and URIs<kbd>⌘ / Ctrl K</kbd></div><div id="import-feedback" role="status"></div></section><section id="activity"><div class="sectionhead"><h2>Recent imports</h2><form id="clear-history" class="inline-form" method="post" action="/clear-history" onsubmit="return confirm('Clear import history? Downloaded files will be kept.')"><button class="danger" type="submit">Clear history</button></form></div><div class="list" id="run-list"></div></section></div>'''
+        body += '''<section data-view="transfers" id="transfers"><h1>Downloads</h1><p class="queue-summary" id="queue-summary"></p><div class="notice" id="queue-notice" hidden><span id="queue-error"></span><button type="button" id="reconnect">Reconnect</button></div><div class="controls"><input id="transfer-search" type="search" placeholder="Search downloads" aria-label="Search downloads"><select id="transfer-status" aria-label="Filter download status"><option value="">All statuses</option><option value="downloading">Downloading</option><option value="queued">Queued</option><option value="failed">Failed</option><option value="completed">Complete</option><option value="unknown">Awaiting status</option></select><select id="transfer-sort" aria-label="Sort downloads"><option value="status">Active first</option><option value="newest">Newest first</option><option value="progress">Progress</option><option value="name">Name</option><option value="speed">Speed</option></select><button id="transfer-reverse" type="button" data-reverse="false" aria-pressed="false">Reverse order</button></div><div class="list" id="transfer-list"></div><button id="more-transfers" type="button" hidden>Show more</button></section>'''
+        body += '<section data-view="files" id="files"><div class="sectionhead"><div><h1 style="margin-bottom:0">Library</h1><div class="crumbs">' + ''.join(crumbs) + '</div></div><a class="link" href="' + html.escape(self.path.split('#')[0], quote=True) + '#files">Refresh</a></div><form class="controls" method="get" action="/#files"><input id="library-search" type="search" placeholder="Search this folder" aria-label="Search this folder"><input type="hidden" name="folder" value="' + html.escape(folder, quote=True) + '"><select id="file-sort" name="sort" aria-label="Sort files"><option value="name"' + (' selected' if sort == 'name' else '') + '>Name</option><option value="type"' + (' selected' if sort == 'type' else '') + '>Type</option><option value="size"' + (' selected' if sort == 'size' else '') + '>Size</option><option value="modified"' + (' selected' if sort == 'modified' else '') + '>Modified</option></select><select name="dir" aria-label="File sort direction"><option value="asc"' + (' selected' if direction == 'asc' else '') + '>Ascending</option><option value="desc"' + (' selected' if direction == 'desc' else '') + '>Descending</option></select><button type="submit">Sort</button></form><div class="list">' + (''.join(rows) or '<div class="empty">No files in this folder.</div>') + '</div><p id="library-no-match" class="empty" hidden>No files match your search.</p></section>'
+        initial = json.dumps({'runs': [run_view(run, []) for run in runs], 'transfers': [], 'error': None}).replace('<', '\\u003c')
+        body += '<script type="application/json" id="initial-runs">' + initial + '</script>'
         body += '<script>' + LIVE_JS + '</script>'
         self.send(page(body))
 
