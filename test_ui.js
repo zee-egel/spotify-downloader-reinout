@@ -130,3 +130,7 @@ run("snapshot.library={html:null,error:'Folder removed'};renderLibrary()");
 assert.equal(get('library-list').innerHTML, '');
 assert.equal(get('library-error').textContent, 'Folder removed');
 console.log("UI checks passed");
+
+assert.ok(run("sourceIcon('youtube')").includes('aria-label="Downloaded from YouTube"'));
+assert.ok(run("sourceIcon('soulseek')").includes('alt="Downloaded from Soulseek"'));
+assert.ok(!run("sourceIcon('')").includes('<img'));

@@ -1,3 +1,8 @@
+const sourceIcon = (source) => {
+  if (source === "youtube") return '<span class="track-source" title="Downloaded from YouTube"><svg role="img" aria-label="Downloaded from YouTube" viewBox="0 0 24 24"><path fill="#ff0033" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8Z"/><path fill="white" d="m9.6 15.6 6.3-3.6-6.3-3.6Z"/></svg></span>';
+  if (source === "soulseek") return '<span class="track-source" title="Downloaded from Soulseek"><img alt="Downloaded from Soulseek" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMA/wD/AP83WBt9AAAACXBIWXMAAA7EAAAOxAGVKw4bAAADG0lEQVR42gEQA+/8AP///////////////////////yEg/////////////////////////////////////wH///8AAAAAAAAAAAAAAAAiJQAIBAAABAAAAADW0wAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAA3tsACAwAEAwAEAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAABENAAkJAMbHAENCAAAAAAAAAAAAAAAAAAAAAAAAAAJLSgAAAAAAAAAAAAAAAAAAAAAICAAIDABLTgAICABDRgAAAAAAAAAAAAAAAAAyNQACEBAAW1oAAAAAAAAAAAAAAAAAtbYACAgACAgAtbYAvboAAAAAAAAAAAAAMjUAAPwAAf///2xqAAAAAPj8AAAAAJyaAAAAAFteAAAAAKWiAFNSAPj4APj4APf3APj4AM7PAAH///98egAAAAD4/AAA/AD4/AAAAAAA/AAAAADv9AD4+AD4+AD49AD39wDGxwAAAAACAAAAhIYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAxscAAAAAAAAAAgAAAAAAAISGABENAAgIAAgIAAgEAAAEAAAEAAkEAAAAAAD8AL2+AAAAAAAAAAAAAAH///8AAAAAAAAAAAAAAAAAAAB0dgD4+AAAAAD49ACcngAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAACAQAAAQAAAAAlJ4AAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAkJAAAEAIyOAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAACVlwAABACMigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB////AAAAAAAAAAAArqsA7/AAY2UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAFJVAAkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEtuhEWOEKNEAAAAAElFTkSuQmCC"></span>';
+  return '<span class="track-source" aria-hidden="true"></span>';
+};
 const esc = (s) =>
   String(s ?? "").replace(
     /[&<>"']/g,
@@ -324,7 +329,7 @@ function renderRuns() {
                 (t, j) =>
                   '<div class="track-row"><span class="track-number">' +
                   (j + 1) +
-                  '</span><div class="track-info"><span class="track-title" title="' +
+                  '</span>' + sourceIcon(t.downloadSource) + '<div class="track-info"><span class="track-title" title="' +
                   esc(t.title) +
                   '">' +
                   esc(t.title || "Untitled track") +

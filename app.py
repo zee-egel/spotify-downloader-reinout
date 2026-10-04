@@ -165,6 +165,7 @@ def run_view(run, transfers):
         tracks.append({'batchId': batch or next((file['batchId'] for file in files), ''),
             'spotifyId': track.get('spotifyId') or '', 'artist': track.get('artist') or '', 'title': track.get('title') or '',
             'status': status, 'fallback': bool(track.get('fallbackAttempted')),
+            'downloadSource': ('youtube' if track.get('youtubeStatus') == 'completed' or (track.get('fallbackSource') == 'YouTube' and not batch) else 'soulseek' if batch or track.get('username') else '') if status == 'completed' else '',
             'source': track.get('fallbackSource') if track.get('fallbackAttempted') else next((f['username'] for f in files), track.get('username') or ''),
             'percent': max((file['percent'] for file in files), default=0)})
     counts = {kind: sum(track['status'] == kind for track in tracks) for kind in ('completed', 'downloading', 'queued locally', 'queued remotely', 'failed', 'search timeout', 'search error', 'unknown')}

@@ -739,3 +739,6 @@ kbd {
 
 #library-activity { margin: 0 0 32px; }
 #library-activity h2 { margin-bottom: 16px; }
+
+.track-source { width: 20px; height: 20px; flex: 0 0 20px; display: inline-flex; align-items: center; justify-content: center; }
+.track-source img, .track-source svg { width: 20px; height: 20px; object-fit: contain; }
