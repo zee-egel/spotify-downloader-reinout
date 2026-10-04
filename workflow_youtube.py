@@ -1,6 +1,6 @@
 """Patch an exported live workflow: python3 workflow_youtube.py before.json after.json.
 
-Deploy the app with yt-dlp before applying the resulting n8n update body.
+Install youtube_fallback.py and yt-dlp on the n8n execution host first.
 """
 import copy
 import json
@@ -38,7 +38,7 @@ for (const d of downloads) {
   const f = batch[0];
   const stalled = now - d.progressAt >= wait;
   if (!complete(f) && !stalled) continue;
-  if (d.fallbackAttempted && !d.youtubePending && now - (d.fallbackAt ?? now) < wait) continue;
+  if (d.fallbackAttempted && now - (d.fallbackAt ?? now) < wait) continue;
   const alternate = d.fastFallbackCandidate ?? d.fallbackCandidate;
   const different = alternate && (alternate.username !== f.username || alternate.filename !== f.filename);
   const target = !d.fallbackAttempted && different ? 'soulseek' : 'youtube';
@@ -73,13 +73,12 @@ return [{json:{...summary, downloads, batchIds:[...ids],
 RECORD = r"""
 const state = $('Check Playlist Completion').last().json;
 const original = state.pendingFallback;
-const result = $json;
-const known = ['pending','completed','no_match','failed'].includes(result.status);
-const errors = known ? 0 : (original.youtubeErrors ?? 0) + 1;
-const status = known ? result.status : errors >= 3 ? 'failed' : 'pending';
-const done = status !== 'pending';
+let result;
+try { result = JSON.parse($json.stdout); } catch (_) { result = {status:'failed', reason:'YouTube command failed'}; }
+const status = ['completed','no_match','failed'].includes(result?.status) ? result.status : 'failed';
+const done = true;
 const success = status === 'completed';
-const update = {...original, youtubeErrors:errors, youtubeStatus:status, youtubePending:!done,
+const update = {...original, youtubeStatus:status,
   youtubeAttempted:done, youtubeResult:result, fallbackSource:'YouTube', fallbackAttempted:true,
   fallbackAt:original.fallbackAt ?? Date.now(),
   ...(success ? {status:'completed', batchId:null, username:'YouTube', filename:result.filename} : {})};
@@ -121,14 +120,12 @@ return [{json:{...state, downloads, pendingFallback:null, ready:false}}];
     choice = copy.deepcopy(nodes['Remote Queue Fallback'])
     choice.update(id='youtube-fallback-choice', name='YouTube Fallback', position=[5000, 800])
     choice['parameters']['conditions']['conditions'][0]['leftValue'] = "={{ $json.pendingFallback.target === 'youtube' }}"
-    request = copy.deepcopy(nodes['Report Queue Status'])
-    base = request['parameters']['url'].removesuffix('/workflow-status')
-    request.update(id='youtube-start-poll', name='Download YouTube Audio', position=[5200, 700], onError='continueRegularOutput')
-    request['credentials'] = {'httpHeaderAuth': copy.deepcopy(nodes['Playlist desk webhook']['credentials']['httpHeaderAuth'])}
-    request['parameters'] = {'method':'POST', 'url':base + '/workflow-youtube',
-        'authentication':'genericCredentialType', 'genericAuthType':'httpHeaderAuth',
-        'sendBody':True, 'specifyBody':'json', 'options':{'timeout':15000},
-        'jsonBody':"={{ { submissionId: $('Playlist desk webhook').first().json.body.submissionId, track: $json.pendingFallback } }}"}
+    # URI-encode all data and explicitly escape apostrophes before shell interpolation.
+    command = '={{ "python3 /opt/n8n-scripts/youtube_fallback.py \'" + encodeURIComponent(JSON.stringify({profileId: $(\'Playlist desk webhook\').first().json.body.profileId ?? \'owner\', track: $json.pendingFallback})).replace(/\'/g, \'%27\') + "\'" }}'
+    request = {'id':'youtube-command', 'name':'Download YouTube Audio',
+        'type':'n8n-nodes-base.executeCommand', 'typeVersion':1,
+        'position':[5200,700], 'onError':'continueRegularOutput',
+        'parameters':{'executeOnce':False, 'command':command}}
     record = {'id':'youtube-record', 'name':'Record YouTube Result', 'type':'n8n-nodes-base.code',
               'typeVersion':2, 'position':[5400,700], 'parameters':{'jsCode':RECORD}}
     report = copy.deepcopy(nodes['Report Fallback Status'])

@@ -1,6 +1,4 @@
-"""Bounded, restart-safe YouTube audio jobs for the authenticated workflow callback."""
-import fcntl
-import hashlib
+"""One-shot YouTube downloader invoked by n8n; stdout is one JSON result."""
 import json
 import math
 import os
@@ -54,35 +52,6 @@ def validate(track):
         raise ValueError('Invalid duration')
     if not tokens(track['title']) or not tokens(track['primaryArtist']):
         raise ValueError('Track needs manual matching')
-
-
-def atomic_json(path, value):
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(value))
-    temporary.replace(path)
-
-
-def start(state_dir, root, submission, track):
-    validate(track)
-    key = hashlib.sha256((submission + ':' + track['spotifyId']).encode()).hexdigest()
-    job = state_dir / 'youtube' / key
-    job.mkdir(parents=True, exist_ok=True)
-    result = job / 'result.json'
-    if result.exists():
-        return json.loads(result.read_text())
-    # ponytail: OS file locks suit one shared filesystem; use a job queue for multiple hosts.
-    with (job / 'request.lock').open('w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        request = job / 'request.json'
-        if not request.exists():
-            atomic_json(request, {'root': str(root), 'track': track})
-        # Each poll can restart a crashed job; the worker lock prevents concurrent downloads.
-        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), str(job)],
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, start_new_session=True)
-        import threading
-        threading.Thread(target=child.wait, daemon=True).start()
-    return {'status': 'pending'}
 
 
 def download(job, request):
@@ -147,22 +116,28 @@ def download(job, request):
     return {'status': 'no_match', 'reason': 'No YouTube result matched artist, title, version and duration'}
 
 
-def worker(job):
-    with (job / 'worker.lock').open('w') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return
-        if (job / 'result.json').exists():
-            return
-        try:
-            result = download(job, json.loads((job / 'request.json').read_text()))
-        except subprocess.TimeoutExpired:
-            result = {'status': 'failed', 'reason': 'YouTube search/download timed out'}
-        except (OSError, ValueError, KeyError, subprocess.CalledProcessError):
-            result = {'status': 'failed', 'reason': 'YouTube extraction or audio validation failed'}
-        atomic_json(job / 'result.json', result)
+def main(encoded):
+    from urllib.parse import unquote
+    try:
+        if len(encoded) > 65536:
+            raise ValueError('Request too large')
+        payload = json.loads(unquote(encoded))
+        profile = payload.get('profileId', 'owner')
+        if profile not in ('owner', 'extra'):
+            raise ValueError('Invalid profile')
+        root = Path(os.environ.get('DOWNLOADS_ROOT', '/downloads')).resolve()
+        if profile == 'extra':
+            target = root / 'profiles' / 'extra'
+            if (root / 'profiles').is_symlink() or target.is_symlink():
+                raise ValueError('Invalid profile destination')
+            root = target
+        with tempfile.TemporaryDirectory() as temporary:
+            return download(Path(temporary), {'root': str(root), 'track': payload['track']})
+    except subprocess.TimeoutExpired:
+        return {'status': 'failed', 'reason': 'YouTube search/download timed out'}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError):
+        return {'status': 'failed', 'reason': 'YouTube extraction or audio validation failed'}
 
 
 if __name__ == '__main__':
-    worker(Path(sys.argv[1]))
+    print(json.dumps(main(sys.argv[1] if len(sys.argv) == 2 else '')))

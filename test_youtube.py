@@ -1,14 +1,11 @@
 """Offline fallback checks: python3 test_youtube.py (requires Node, no downloads)."""
 import json
-import io
-import os
 import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch as mock_patch
 from youtube_fallback import download, duration_matches, matches, validate
 from workflow_youtube import CHECK, RECORD, patch
-import app
 
 track = {'spotifyId':'a'*22, 'title':'Example Song', 'primaryArtist':'Example Artist',
          'playlistName':'Example playlist', 'durationSeconds':200}
@@ -57,24 +54,6 @@ with tempfile.TemporaryDirectory() as temporary:
         result = download(job, {'track':track,'root':str(root/'rejected')})
         assert result['status'] == 'no_match' and not (root/'rejected').exists()
 
-with tempfile.TemporaryDirectory() as temporary, mock_patch.dict(os.environ, {'N8N_WEBHOOK_TOKEN':'test-token'}):
-    payload = json.dumps({'submissionId':'run', 'track':track}).encode()
-    handler = object.__new__(app.Handler)
-    handler.headers = {'X-Playlist-Token':'wrong', 'Content-Length':str(len(payload))}
-    handler.rfile = io.BytesIO(payload)
-    responses = []
-    handler.send_error = lambda status: responses.append(status)
-    handler.send = lambda data, **kwargs: responses.append(json.loads(data))
-    with mock_patch('youtube_fallback.start', return_value={'status':'pending'}) as start, \
-         mock_patch.object(app,'ROOT',Path(temporary)), \
-         mock_patch.object(app,'read_runs',return_value=[{'submissionId':'run','owner':'extra'}]):
-        handler.workflow_youtube()
-        assert responses.pop() == 403 and not start.called
-        handler.headers['X-Playlist-Token'] = 'test-token'
-        handler.workflow_youtube()
-        assert responses.pop() == {'status':'pending'}
-        assert start.call_args.args[1] == Path(temporary)/'profiles'/'extra'
-
 subprocess.run(['node','-e',r'''
 const assert = require('node:assert/strict');
 const {check,record} = JSON.parse(require('node:fs').readFileSync(0,'utf8'));
@@ -107,7 +86,7 @@ const problem = {...metadata,status:'no_match'};
 out = poll({...summary,downloads:[],batchIds:[],problems:[problem]},[]);
 assert.equal(out.pendingFallback.target,'youtube'); assert.equal(out.pendingFallback.durationSeconds,200);
 const $ = () => ({last:()=>({json:out})});
-const recorded = new Function('$','$json',record)($,{status:'completed',filename:'song.m4a'})[0].json;
+const recorded = new Function('$','$json',record)($,{stdout:JSON.stringify({status:'completed',filename:'song.m4a'})})[0].json;
 assert.equal(recorded.problems.length,0); assert.equal(recorded.downloads[0].status,'completed');
 assert.equal(recorded.downloads[0].batchId,null); assert.equal(recorded.noMatch,0);
 out = poll(recorded,[]); assert.equal(out.completedFiles,1); assert.equal(out.ready,true);
