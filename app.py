@@ -330,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('The download service is not configured yet.')
             headers = {'Content-Type': 'application/json'}
             if os.environ.get('N8N_WEBHOOK_TOKEN'):
-                headers['Authorization'] = 'Bearer ' + os.environ['N8N_WEBHOOK_TOKEN']
+                headers['X-Webhook-Token'] = os.environ['N8N_WEBHOOK_TOKEN']
             submission_id = uuid.uuid4().hex
             with STATE_LOCK:
                 runs = read_runs()
