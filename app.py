@@ -38,7 +38,7 @@ def playlist_id(value):
 def inside(relative, root=None):
     root = ROOT if root is None else root
     target = (root / relative).resolve()
-    if not target.is_relative_to(root) or (root == ROOT and target.is_relative_to(ROOT / 'profiles')):
+    if not target.is_relative_to(root):
         raise ValueError('Path outside downloads')
     return target
 
@@ -219,7 +219,7 @@ def library_view(folder='', sort='name', direction='asc', root=None):
         directory = inside(folder, root)
         if not directory.is_dir():
             raise ValueError('Folder not found')
-        items = sorted((p for p in directory.iterdir() if p.resolve().is_relative_to(root) and not p.is_symlink() and not (root == ROOT and p.name == 'profiles')), key=lambda p: file_sort_key(p, sort), reverse=direction == 'desc')
+        items = sorted((p for p in directory.iterdir() if p.resolve().is_relative_to(root) and not p.is_symlink()), key=lambda p: file_sort_key(p, sort), reverse=direction == 'desc')
         rows = []
         for item in items:
             rel = str(item.relative_to(root))
@@ -278,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
             for run in selections.get((transfer['username'], transfer['filename']), []):
                 if transfer.get('date') and transfer['date'] >= run['submitted']:
                     owners.add(run.get('owner', 'owner'))
-            if self.user in owners or (self.user == 'owner' and not owners and not os.environ.get('EXTRA_APP_USER')):
+            if self.user == 'owner' or self.user in owners:
                 visible.append(transfer)
         return visible, error
 
@@ -408,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
                 relative = form.get('path', [''])[0]
                 parts = Path(relative)
                 target = inside(relative, self.download_root())
-                if not relative or parts.is_absolute() or '..' in parts.parts or target == self.download_root():
+                if not relative or parts.is_absolute() or '..' in parts.parts or target == self.download_root() or target == ROOT / 'profiles':
                     raise ValueError('Invalid delete path')
                 check = self.download_root()
                 for part in parts.parts:
@@ -552,7 +552,7 @@ class Handler(BaseHTTPRequestHandler):
                         dirs[:] = [d for d in dirs if inside(str((Path(base) / d).relative_to(self.download_root())), self.download_root()).is_dir()]
                         for name in files:
                             file = Path(base) / name
-                            if file.is_file() and file.resolve().is_relative_to(self.download_root()) and not (self.download_root() == ROOT and file.resolve().is_relative_to(ROOT / 'profiles')):
+                            if file.is_file() and file.resolve().is_relative_to(self.download_root()):
                                 archive.write(file, file.relative_to(target))
         except (ValueError, FileNotFoundError) as error:
             self.send(page('<div class="error">' + html.escape(str(error)) + '</div>'), status=400)

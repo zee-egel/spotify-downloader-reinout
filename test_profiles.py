@@ -108,10 +108,10 @@ with tempfile.TemporaryDirectory() as temporary:
     assert b'owner.mp3' not in friend_page and b'Owner playlist' not in friend_page
     assert b'friend.mp3' in friend_page
     owner_page = fetch('/', user='admin').read()
-    assert b'owner.mp3' in owner_page and b'friend.mp3' not in owner_page
+    assert b'owner.mp3' in owner_page and b'profiles' in owner_page
     rejected('/file?path=../../owner.mp3', 400)
     rejected('/file?path=escape', 400)
-    rejected('/file?path=profiles/extra/friend.mp3', 400, user='admin')
+    assert fetch('/file?path=profiles/extra/friend.mp3', user='admin').read() == b'friend file'
     rejected('/delete', 400, form={'path': '../../owner.mp3'})
     rejected('/delete', 400, user='admin', form={'path': 'profiles'})
     assert fetch('/file?path=friend.mp3').read() == b'friend file'
@@ -120,7 +120,8 @@ with tempfile.TemporaryDirectory() as temporary:
     archive = zipfile.ZipFile(io.BytesIO(fetch('/zip?path=Playlist').read()))
     assert archive.namelist() == ['song.mp3']
     assert b'owner.mp3' in fetch('/transfers', user='admin').read()
-    assert b'friend.mp3' not in fetch('/transfers', user='admin').read()
+    assert b'friend.mp3' in fetch('/transfers', user='admin').read()
+    assert b'hidden.mp3' in fetch('/transfers', user='admin').read()
     assert b'No transfers' in fetch('/transfers').read()
     rejected('/profile/telegram', 403, form={'token': '123:bot-secret', 'chat': '123'}, origin=False)
     rejected('/profile/telegram', 400, form={'token': 'https://evil.example', 'chat': '123'})
@@ -150,7 +151,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 'state': {'downloads': [{'batchId': 'friend-batch', 'artist': 'Artist', 'title': 'Friend Song'}]}}
     assert fetch('/workflow-status', callback=callback).status == 200
     assert b'Friend Song' in fetch('/').read() and b'Friend Song' not in fetch('/', user='admin').read()
-    assert b'friend.mp3' in fetch('/transfers').read() and b'friend.mp3' not in fetch('/transfers', user='admin').read()
+    assert b'friend.mp3' in fetch('/transfers').read() and b'friend.mp3' in fetch('/transfers', user='admin').read()
     # Clearing a profile's visible history keeps transfer ownership and the other user's history.
     assert fetch('/clear-history', form={}).status == 200
     assert b'Friend playlist' not in fetch('/').read() and b'Owner playlist' in fetch('/', user='admin').read()
