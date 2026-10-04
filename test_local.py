@@ -19,10 +19,11 @@ class MockWebhook(BaseHTTPRequestHandler):
     callback_url = None
 
     def do_POST(self):
-        if self.headers.get('X-Webhook-Token') != 'callback-secret':
+        if self.headers.get('X-Playlist-Token') != 'callback-secret':
             self.send_response(403)
             self.end_headers()
             return
+        assert self.headers.get('X-Webhook-Token') == 'callback-secret'
         if self.status == 200:
             self.received.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
             if self.callback_url:

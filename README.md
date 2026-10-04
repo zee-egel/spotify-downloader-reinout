@@ -4,6 +4,8 @@ A small personal dashboard for Spotify playlist submissions, slskd transfers, an
 
 ## Deploy on the Pi
 
+For Railway, use the public production webhook URL and set `N8N_WEBHOOK_TOKEN` to the value in n8n's **Header Auth account 5**. Set that credential's header name to `X-Playlist-Token`; use it on the webhook and all dashboard callback nodes. The app sends this header on submissions as well as the legacy `X-Webhook-Token` header, preserving the original Pi workflow. Redeploy the app after updating its code. Callback URLs must point to `https://dj.reinout.dance/workflow-status`.
+
 1. Pull this repo. Copy `.env.example` to `.env` on the Pi and keep it private. Set `APP_PASSWORD`, `SLSKD_API_KEY`, `N8N_WEBHOOK_URL`, and `N8N_WEBHOOK_TOKEN`. The webhook URL and token were generated in the development machine's ignored `.env`; transfer those two values privately to the Pi. The webhook URL uses `http://n8n-n8n-1:5678` on the shared `n8n_default` Docker network.
 2. Confirm slskd stores completed files at `/downloads`, backed by `/home/admin/slskd/downloads`. The reported host mount and Docker network are prefilled in `.env.example`. The app mounts this completed-downloads directory read-write for deletion. On the Pi, grant the app's UID 1000 access with `sudo setfacl -R -m u:1000:rwX /home/admin/slskd/downloads` and `sudo find /home/admin/slskd/downloads -type d -exec setfacl -m d:u:1000:rwx {} +`. Install the `acl` package if `setfacl` is missing.
 3. Run `docker compose up -d --build`. Open `http://localhost:1111` through an SSH tunnel (`ssh -N -L 1111:127.0.0.1:1111 pi`) or configure an authenticated HTTPS reverse proxy. The browser chooses where downloads land on your Mac.
