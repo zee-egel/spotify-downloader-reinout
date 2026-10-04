@@ -332,7 +332,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send(b'{"error":"Notification could not be delivered"}', kind='application/json', status=502)
 
     def auth(self):
-        accounts = profiles.accounts()
+        try:
+            accounts = profiles.accounts()
+        except ValueError:
+            self.send_error(503, 'Account names must differ')
+            return False
         if not os.environ.get('APP_PASSWORD'):
             self.send_error(503, 'Set APP_PASSWORD before serving the app')
             return False
@@ -366,6 +370,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if self.path == '/workflow-youtube':
+            self.workflow_youtube()
+            return
         if self.path in ('/workflow-status', '/workflow-notify'):
             self.workflow_status() if self.path == '/workflow-status' else self.workflow_notify()
             return
@@ -380,6 +387,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(403, 'Invalid origin')
             return
         try:
+            submission_id = None
             length = int(self.headers.get('Content-Length', '0'))
             if not 0 <= length <= 4096:
                 raise ValueError('Input too large')
@@ -476,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Location', '/')
             self.end_headers()
         except urllib.error.HTTPError as error:
-            if self.path.startswith(('/profile/', '/spotify/')) or (self.path == '/submit' and os.environ.get('SPOTIFY_CLIENT_ID') and not locals().get('submission_id')):
+            if self.path.startswith(('/profile/', '/spotify/')) or (self.path == '/submit' and os.environ.get('SPOTIFY_CLIENT_ID') and not submission_id):
                 self.send(page('<p>The connected service rejected this request. Check your connection in Profile and try again.</p><a href="/profile">Profile</a>'), status=502)
                 return
             self.log_error('n8n webhook returned HTTP %d', error.code)
@@ -550,6 +558,32 @@ class Handler(BaseHTTPRequestHandler):
                                 archive.write(file, file.relative_to(target))
         except (ValueError, FileNotFoundError) as error:
             self.send(page('<div class="error">' + html.escape(str(error)) + '</div>'), status=400)
+
+    def workflow_youtube(self):
+        expected = os.environ.get('N8N_WEBHOOK_TOKEN', '')
+        if not expected or not hmac.compare_digest(self.headers.get('X-Playlist-Token', ''), expected):
+            self.send_error(403)
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 16384:
+                raise ValueError('Invalid request size')
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict):
+                raise ValueError('Invalid request')
+            with STATE_LOCK:
+                run = next((r for r in read_runs() if r.get('submissionId') and r['submissionId'] == payload.get('submissionId')), None)
+            if not run:
+                self.send_error(404)
+                return
+            self.user = run.get('owner', 'owner')
+            if self.user not in ('owner', 'extra'):
+                raise ValueError('Invalid profile')
+            import youtube_fallback
+            result = youtube_fallback.start(STATE.resolve().parent, self.download_root(), run['submissionId'], payload.get('track'))
+            self.send(json.dumps(result).encode(), kind='application/json')
+        except (ValueError, TypeError, OSError):
+            self.send(b'{"status":"failed","reason":"Invalid or unavailable YouTube job"}', kind='application/json', status=400)
 
     def workflow_status(self):
         expected = os.environ.get('N8N_WEBHOOK_TOKEN', '')

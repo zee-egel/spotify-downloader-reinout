@@ -22,6 +22,27 @@ The app's local smoke checks pass with mocked webhook and slskd responses and sa
 
 ## Interface
 
+## Two accounts and personal connections
+
+The existing `APP_USER` / `APP_PASSWORD` login remains the owner account. To add one account, set `EXTRA_APP_USER` and `EXTRA_APP_PASSWORD` in Railway. There is no signup flow. The additional account has its own import history, transfer visibility, Spotify connection, Telegram settings, and downloads directory (`profiles/extra` under the completed-downloads root). The owner cannot browse or delete that directory through the app. When the second account is configured, untracked slskd transfers are hidden instead of exposing another user's downloads. Clearing history hides imports but retains ownership records, so transfers stay private.
+
+Set `SPOTIFY_CLIENT_ID` to your Spotify developer application's client ID and `APP_PUBLIC_URL=https://dj.reinout.dance`. Add `https://dj.reinout.dance/spotify/callback` as an allowed redirect URI in Spotify's developer dashboard, and allowlist both Spotify users if the app is in development mode. No Spotify client secret is needed: the app uses authorization code with PKCE, short-lived user-bound state, and token refresh. Each person opens **Profile → Connect Spotify**, then authorizes their own account. Imports use that person's Spotify access, including private playlists; Spotify tokens stay in the app and are never passed to n8n.
+
+In **Profile**, users can save a Telegram bot token and numeric chat ID. Create the bot through BotFather and start a chat with it first. The app verifies the bot and chat; **Send test message** checks delivery. Tokens are never shown back in HTML. Workflow messages are routed by the recorded submission owner rather than a user ID supplied in the callback. No configured bot means notifications are skipped. Personal bot connections replace the workflow's old shared Telegram credential for new runs.
+
+Deployment order:
+
+1. Deploy the app code with the second account variables unset initially. Mount persistent storage at `/state`; profile tokens and settings are stored in `/state/profiles.sqlite3` with mode 0600, alongside the import history. Run one app replica. The database contains secrets and must stay private, including its backups.
+2. Set `SPOTIFY_CLIENT_ID` / `APP_PUBLIC_URL`, register the Spotify redirect URI, and connect the owner account in Profile.
+3. Apply `workflow_profiles.py` to an export of the **slskd live** workflow (`t0BF6Lwkxmq6STOC`): `python3 workflow_profiles.py before.json after.json`. The result is a `PUT /api/v1/workflows/t0BF6Lwkxmq6STOC` body. Publish the updated workflow after deploying the app. It reads playlist metadata from the submission, directs both normal and fallback downloads to the user's directory, and sends notifications to the app's `/workflow-notify` endpoint using the existing callback credential. It requires linked Spotify accounts for new imports; existing executions retain their stored logic.
+4. Set `EXTRA_APP_USER` / `EXTRA_APP_PASSWORD`, then have the second person log in and connect Spotify and Telegram. Do not enable their login before publishing the profile workflow: the old workflow does not route private download destinations. Browser Basic authentication caches logins, so use separate browser profiles for the two accounts when testing.
+
+The app's downloads root must expose the same completed files as slskd for Library access. A Railway volume is not a mount of the Pi's filesystem; configuring `SLSKD_URL` alone provides transfer status, not local access to Pi files. The new profile folder must exist in the filesystem visible to the app. slskd must use its normal destination rules rather than the special `{}` setting that discards destination subdirectories.
+
+The shared search service still permits one search at a time. While a playlist is resolving, another import returns a retry message; status callbacks renew a five-minute lease. A stalled run can outlive this lease, so this is for the current single-replica, two-account deployment, not a general job queue.
+
+Run `python3 test_profiles.py` for isolated checks covering cross-account file/ZIP/delete access, history, event streams, transfer ownership, OAuth state/replay and refresh, private Telegram routing, and generated workflow destinations. These checks mock external services; live Spotify consent and slskd file placement require deployment verification.
+
 The dark interface has Import, Downloads, and Library views. Import accepts Spotify playlist URLs or URIs; album and track imports are not supported by the workflow. Downloads shows live progress, filters, source details, and 100 files at a time. Library searches the current folder and retains sorting, individual downloads, ZIP downloads, and confirmed deletion. Cmd/Ctrl+K focuses the current view’s input; Escape clears search or closes the focused details section. No frontend dependencies or build step are required; Docker includes `ui.css` and `ui.js` alongside `app.py`.
 
 Run `python3 test_local.py` for authenticated HTTP workflow checks and `node test_ui.js` for frontend rendering, routing, escaping, filtering, and pagination checks. These use isolated fixtures, not production downloads. The UI redesign has not received browser visual QA because browser access was unavailable; the configured slskd service was also unreachable during verification. Desktop/mobile layout and the live Pi workflow still need browser verification.
