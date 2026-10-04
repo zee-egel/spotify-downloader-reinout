@@ -1,5 +1,15 @@
 # Playlist desk
 
+## YouTube fallback (local implementation; deployment required)
+
+`workflow_youtube.py` patches a fresh export of the live workflow. Rebuild the app first so `/workflow-youtube` and yt-dlp, Node and ffprobe are available, then generate the n8n update body with `python3 workflow_youtube.py before.json after.json`. Preserve the live workflow's credentials and profile routing; do not apply an old workflow export over newer edits.
+
+After the initial track pass, the patched workflow waits five minutes before replacing unresolved Soulseek transfers with a different saved candidate. It allows that alternate five minutes before YouTube. Downloads with advancing byte counts are left running; stalled transfers must be cancelled and verified before replacement. No-match/review/search-error items go to YouTube after the initial five minutes. Missing transfer state is never treated as permission to start a duplicate. The existing 48-hour monitoring ceiling remains for transfers whose status or cancellation cannot be verified.
+
+The authenticated callback starts/polls a durable local job and derives the destination profile from the recorded submission. yt-dlp searches ten candidates and checks up to three matches. It requires artist/title and version agreement, with duration tolerance of 1% clamped to 2–5 seconds, and checks the downloaded file with ffprobe. This is conservative metadata matching, not an audio fingerprint guarantee. The best available audio-only stream is kept in its original container without lossy conversion or artificial bitrate inflation. Search/download work has a four-minute overall deadline and a 90-second per-command limit. Failed or unmatched jobs are recorded instead of retried indefinitely.
+
+Run `python3 test_youtube.py` for offline matching, duration, quality-selection and retry-state checks. Live YouTube availability and server deployment still require verification.
+
 A small personal dashboard for Spotify playlist submissions, slskd transfers, and completed files. It uses Python's standard library and stores recent submissions in one JSON file. The UI is protected with HTTP Basic authentication. Serve it through an HTTPS reverse proxy or a private VPN; the Compose port is bound to localhost by default.
 
 ## Deploy on the Pi

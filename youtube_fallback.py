@@ -13,8 +13,13 @@ import time
 import unicodedata
 
 
+def normalized(value):
+    value = ''.join(c for c in unicodedata.normalize('NFKD', value) if not unicodedata.combining(c))
+    return ' '.join(re.findall(r'[^\W_]+', value.casefold()))
+
+
 def tokens(value):
-    return set(re.findall(r'[^\W_]+', unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode().lower()))
+    return set(normalized(value).split())
 
 
 def duration_matches(expected, actual):
@@ -25,9 +30,11 @@ def matches(track, video):
     title = tokens(str(video.get('title') or ''))
     artist = tokens(track['primaryArtist'])
     wanted = tokens(track['title'])
-    source = title | tokens(str(video.get('channel') or video.get('uploader') or ''))
+    sources = [normalized(str(video.get(key) or '')) for key in ('title', 'channel', 'uploader')]
     versions = {'live', 'remix', 'cover', 'karaoke', 'instrumental', 'sped', 'slowed', 'extended', 'edit', 'remaster', 'remastered'}
-    return bool(wanted and artist and wanted <= title and artist <= source
+    artist_match = any(' ' + normalized(track['primaryArtist']) + ' ' in ' ' + s + ' ' for s in sources)
+    title_match = ' ' + normalized(track['title']) + ' ' in ' ' + sources[0] + ' '
+    return bool(wanted and artist and title_match and artist_match
                 and not ((title - wanted) & versions)
                 and video.get('live_status') not in ('is_live', 'is_upcoming', 'post_live')
                 and not video.get('is_live')
@@ -115,11 +122,12 @@ def download(job, request):
                 continue
             root = Path(request['root']).resolve()
             folder_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', track['playlistName']).replace('..', '_').strip('. ') or 'Spotify Playlist'
+            folder_name = folder_name.encode()[:200].decode('utf-8', 'ignore')
             folder = root / folder_name
             if folder_name == 'profiles' or not folder.resolve().is_relative_to(root):
                 raise ValueError('Invalid destination')
             folder.mkdir(parents=True, exist_ok=True)
-            name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', track['primaryArtist'] + ' - ' + track['title'])[:140]
+            name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', track['primaryArtist'] + ' - ' + track['title']).encode()[:140].decode('utf-8', 'ignore')
             destination = folder / (name + ' [' + track['spotifyId'] + ']' + audio.suffix)
             # Copy then rename on the downloads filesystem: partial audio never appears in Library.
             import shutil
