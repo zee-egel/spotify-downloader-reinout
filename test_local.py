@@ -201,7 +201,8 @@ with tempfile.TemporaryDirectory() as temporary:
     fetch('/delete', urllib.parse.urlencode({'path': 'Playlist'}).encode(), origin=base)
     assert not (Path(temporary) / 'Playlist').exists()
     fetch('/clear-history', b'', origin=base)
-    assert app.read_runs() == []
+    assert all(run.get('hidden') for run in app.read_runs())
+    assert b'Test Playlist' not in fetch('/').read()
     server.shutdown()
     webhook.shutdown()
     slskd.shutdown()

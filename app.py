@@ -16,6 +16,7 @@ import zipfile
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import profiles
 
 ROOT = Path(os.environ.get('DOWNLOADS_ROOT', './downloads')).resolve()
 STATE = Path(os.environ.get('STATE_FILE', './state.json'))
@@ -34,9 +35,10 @@ def playlist_id(value):
     return match.group(1) if match else None
 
 
-def inside(relative):
-    target = (ROOT / relative).resolve()
-    if not target.is_relative_to(ROOT):
+def inside(relative, root=None):
+    root = ROOT if root is None else root
+    target = (root / relative).resolve()
+    if not target.is_relative_to(root) or (root == ROOT and target.is_relative_to(ROOT / 'profiles')):
         raise ValueError('Path outside downloads')
     return target
 
@@ -207,22 +209,23 @@ def playlist_name(ident):
         return None
 
 
-def library_view(folder='', sort='name', direction='asc'):
+def library_view(folder='', sort='name', direction='asc', root=None):
+    root = ROOT if root is None else root
     sort = sort if sort in ('name', 'type', 'size', 'modified') else 'name'
     direction = direction if direction in ('asc', 'desc') else 'asc'
     sort_query = '&sort=' + sort + '&dir=' + direction
     try:
-        directory = inside(folder)
+        directory = inside(folder, root)
         if not directory.is_dir():
             raise ValueError('Folder not found')
-        items = sorted((p for p in directory.iterdir() if p.resolve().is_relative_to(ROOT) and not p.is_symlink()), key=lambda p: file_sort_key(p, sort), reverse=direction == 'desc')
+        items = sorted((p for p in directory.iterdir() if p.resolve().is_relative_to(root) and not p.is_symlink() and not (root == ROOT and p.name == 'profiles')), key=lambda p: file_sort_key(p, sort), reverse=direction == 'desc')
         rows = []
         for item in items:
-            rel = str(item.relative_to(ROOT))
+            rel = str(item.relative_to(root))
             quoted = urllib.parse.quote(rel)
             delete = '<form class="inline-form" method="post" action="/delete" onsubmit="return confirm(\'Delete this item permanently?\')"><input type="hidden" name="path" value="' + html.escape(rel, quote=True) + '"><button class="danger" type="submit">Delete</button></form>'
             if item.is_dir():
-                count = sum(1 for child in item.iterdir() if not child.is_symlink() and child.resolve().is_relative_to(ROOT))
+                count = sum(1 for child in item.iterdir() if not child.is_symlink() and child.resolve().is_relative_to(root))
                 rows.append(f'<div class="row library-row folder" data-path="{html.escape(rel, quote=True)}"><div><a class="filename" href="/?folder={quoted}{sort_query}#files"><span class="file-icon">▣</span><strong>{safe_name(item)}</strong></a><div class="muted">{count} item{"s" if count != 1 else ""} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/?folder={quoted}{sort_query}#files">Open</a><a class="link" href="/zip?path={quoted}">Download ZIP</a>{delete}</div></div>')
             elif item.is_file():
                 rows.append(f'<div class="row library-row" data-path="{html.escape(rel, quote=True)}"><div><div class="filename"><span class="file-icon">♪</span><strong>{safe_name(item)}</strong></div><div class="muted">{size_label(item.stat().st_size)} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/file?path={quoted}">Download</a>{delete}</div></div>')
@@ -236,13 +239,101 @@ LIVE_JS = Path(__file__).with_name('ui.js').read_text()
 
 
 def page(body, title='Playlist desk'):
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>{html.escape(title)}</title><style>{CSS}</style></head><body><a class="skip" href="#main">Skip to content</a><div class="shell"><header class="top"><a class="brand" href="/"><span class="mark" aria-hidden="true">♫</span>Playlist desk</a><nav class="nav" aria-label="Main navigation"><a href="/#start">Import</a><a href="/#transfers">Downloads</a><a href="/#files">Library</a></nav><span class="connection" id="live-status" role="status"></span></header><main id="main" tabindex="-1">{body}</main></div></body></html>'''.encode()
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>{html.escape(title)}</title><style>{CSS}</style></head><body><a class="skip" href="#main">Skip to content</a><div class="shell"><header class="top"><a class="brand" href="/"><span class="mark" aria-hidden="true">♫</span>Playlist desk</a><nav class="nav" aria-label="Main navigation"><a href="/#start">Import</a><a href="/#transfers">Downloads</a><a href="/#files">Library</a><a href="/profile">Profile</a></nav><span class="connection" id="live-status" role="status"></span></header><main id="main" tabindex="-1">{body}</main></div></body></html>'''.encode()
 
 
 class Handler(BaseHTTPRequestHandler):
+    def log_request(self, code='-', size='-'):
+        # OAuth query strings contain one-time codes; never write them to access logs.
+        self.log_message('%s %s %s', self.command, self.path.split('?')[0], code)
+
+    def runs(self):
+        return [run for run in read_runs() if run.get('owner', 'owner') == self.user and not run.get('hidden')]
+
+    def download_root(self):
+        if self.user == 'owner':
+            return ROOT
+        target = ROOT / 'profiles' / 'extra'
+        if (ROOT / 'profiles').is_symlink() or target.is_symlink():
+            raise ValueError('Profile downloads directory is unavailable')
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    def transfers(self):
+        transfers, error = transfer_snapshot()
+        runs = read_runs()
+        batches = {}
+        selections = {}
+        for run in runs:
+            state = run.get('workflow') or {}
+            for track in (state.get('tracks') or []) + (state.get('downloads') or []):
+                if track.get('batchId'):
+                    batches.setdefault(track['batchId'], set()).add(run.get('owner', 'owner'))
+                elif track.get('username') and track.get('filename'):
+                    selections.setdefault((track['username'], track['filename']), []).append(run)
+        visible = []
+        for transfer in transfers:
+            owners = batches.get(transfer['batchId'], set()).copy()
+            for run in selections.get((transfer['username'], transfer['filename']), []):
+                if transfer.get('date') and transfer['date'] >= run['submitted']:
+                    owners.add(run.get('owner', 'owner'))
+            if self.user in owners or (self.user == 'owner' and not owners and not os.environ.get('EXTRA_APP_USER')):
+                visible.append(transfer)
+        return visible, error
+
+    def redirect(self, url):
+        self.send_response(303)
+        self.send_header('Location', url)
+        self.end_headers()
+
+    def profile_action(self, form):
+        if self.path == '/spotify/connect':
+            self.redirect(profiles.spotify_start(self.user))
+            return
+        if self.path == '/spotify/disconnect':
+            profiles.update(self.user, spotify=None, oauth=None)
+        elif self.path == '/profile/telegram':
+            profiles.save_telegram(self.user, form.get('token', [''])[0], form.get('chat', [''])[0].strip())
+        elif self.path == '/profile/telegram-test':
+            settings = profiles.load(self.user).get('telegram') or {}
+            profiles.telegram(self.user, 'sendMessage', {'chat_id': settings.get('chat'), 'text': 'Your Playlist desk bot is connected.'})
+        elif self.path == '/profile/telegram-disconnect':
+            profiles.update(self.user, telegram=None)
+        self.redirect('/profile')
+
+    def workflow_notify(self):
+        expected = os.environ.get('N8N_WEBHOOK_TOKEN', '')
+        if not expected or not hmac.compare_digest(self.headers.get('X-Playlist-Token', ''), expected):
+            self.send_error(403)
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 16384:
+                raise ValueError('Invalid notification size')
+            payload = json.loads(self.rfile.read(length))
+            message = payload.get('message')
+            if not isinstance(message, str) or not 0 < len(message) <= 4096:
+                raise ValueError('Invalid notification')
+            with STATE_LOCK:
+                runs = read_runs()
+                run = next((r for r in runs if r.get('submissionId') and r['submissionId'] == payload.get('submissionId')), None)
+                if not run:
+                    self.send_error(404)
+                    return
+                owner = run.get('owner', 'owner')
+                settings = profiles.load(owner).get('telegram') or {}
+                digest = hashlib.sha256(message.encode()).hexdigest()
+                if settings and digest not in run.get('notifications', []):
+                    profiles.telegram(owner, 'sendMessage', {'chat_id': settings['chat'], 'text': message})
+                    run.setdefault('notifications', []).append(digest)
+                    save_runs(runs)
+            self.send(b'{}', kind='application/json')
+        except (ValueError, TypeError, urllib.error.URLError, TimeoutError, KeyError):
+            self.send(b'{"error":"Notification could not be delivered"}', kind='application/json', status=502)
+
     def auth(self):
-        expected = os.environ.get('APP_PASSWORD', '')
-        if not expected:
+        accounts = profiles.accounts()
+        if not os.environ.get('APP_PASSWORD'):
             self.send_error(503, 'Set APP_PASSWORD before serving the app')
             return False
         header = self.headers.get('Authorization', '')
@@ -250,7 +341,10 @@ class Handler(BaseHTTPRequestHandler):
             scheme, value = header.split(' ', 1)
             credentials = base64.b64decode(value, validate=True).decode()
             user, password = credentials.split(':', 1)
-            ok = scheme.lower() == 'basic' and hmac.compare_digest(user, os.environ.get('APP_USER', 'admin')) and hmac.compare_digest(password, expected)
+            account = accounts.get(user)
+            ok = scheme.lower() == 'basic' and bool(account and account[1]) and hmac.compare_digest(password.encode(), account[1].encode())
+            if ok:
+                self.user, self.username = account[0], user
         except (ValueError, UnicodeError):
             ok = False
         if not ok:
@@ -272,12 +366,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-        if self.path == '/workflow-status':
-            self.workflow_status()
+        if self.path in ('/workflow-status', '/workflow-notify'):
+            self.workflow_status() if self.path == '/workflow-status' else self.workflow_notify()
             return
         if not self.auth():
             return
-        if self.path not in ('/submit', '/clear-history', '/delete', '/workflow-status'):
+        if self.path not in ('/submit', '/clear-history', '/delete', '/spotify/connect', '/spotify/disconnect', '/profile/telegram', '/profile/telegram-test', '/profile/telegram-disconnect'):
             self.send_error(404)
             return
         origin = self.headers.get('Origin')
@@ -287,12 +381,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get('Content-Length', '0'))
-            if length > 4096:
+            if not 0 <= length <= 4096:
                 raise ValueError('Input too large')
             form = urllib.parse.parse_qs(self.rfile.read(length).decode())
+            if self.path.startswith(('/profile/', '/spotify/')):
+                self.profile_action(form)
+                return
             if self.path == '/clear-history':
                 with STATE_LOCK:
-                    save_runs([])
+                    runs = read_runs()
+                    for run in runs:
+                        if run.get('owner', 'owner') == self.user:
+                            run['hidden'] = True
+                    save_runs(runs)
                 self.send_response(303)
                 self.send_header('Location', '/#activity')
                 self.end_headers()
@@ -300,10 +401,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == '/delete':
                 relative = form.get('path', [''])[0]
                 parts = Path(relative)
-                target = inside(relative)
-                if not relative or parts.is_absolute() or '..' in parts.parts or target == ROOT:
+                target = inside(relative, self.download_root())
+                if not relative or parts.is_absolute() or '..' in parts.parts or target == self.download_root():
                     raise ValueError('Invalid delete path')
-                check = ROOT
+                check = self.download_root()
                 for part in parts.parts:
                     check /= part
                     if check.is_symlink():
@@ -332,12 +433,22 @@ class Handler(BaseHTTPRequestHandler):
             if os.environ.get('N8N_WEBHOOK_TOKEN'):
                 headers['X-Webhook-Token'] = os.environ['N8N_WEBHOOK_TOKEN']
                 headers['X-Playlist-Token'] = os.environ['N8N_WEBHOOK_TOKEN']
+            playlist, items = None, None
+            if os.environ.get('SPOTIFY_CLIENT_ID') or self.user != 'owner':
+                playlist, items = profiles.spotify_playlist(self.user, ident)
             submission_id = uuid.uuid4().hex
             with STATE_LOCK:
                 runs = read_runs()
-                runs.insert(0, {'id': ident, 'submissionId': submission_id, 'name': 'Spotify playlist ' + ident, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitting'})
-                save_runs(runs[:100])
-            req = urllib.request.Request(webhook, json.dumps({'url': url, 'playlistId': ident, 'submissionId': submission_id}).encode(), headers)
+                # ponytail: one app replica and a five-minute callback lease; use a durable queue for multiple replicas.
+                if os.environ.get('EXTRA_APP_USER') and any(
+                    run.get('status') in ('submitting', 'submitted', 'unconfirmed')
+                    and ((run.get('workflow') or {}).get('resolving') or not run.get('workflow'))
+                    and time.time() - datetime.fromisoformat(run.get('updated') or run['submitted']).timestamp() < 300
+                    for run in runs):
+                    raise ValueError('Another playlist is being resolved. Try again after it finishes queueing.')
+                runs.insert(0, {'id': ident, 'submissionId': submission_id, 'name': 'Spotify playlist ' + ident, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitting', 'owner': self.user})
+                save_runs(runs)
+            req = urllib.request.Request(webhook, json.dumps({'url': url, 'playlistId': ident, 'submissionId': submission_id, 'profileId': self.user, 'downloadDirectory': '' if self.user == 'owner' else 'profiles/extra', 'playlist': playlist, 'playlistItems': items}).encode(), headers)
             try:
                 with urllib.request.urlopen(req, timeout=15) as response:
                     if response.status >= 300:
@@ -354,7 +465,7 @@ class Handler(BaseHTTPRequestHandler):
                                 run['status'] = 'unconfirmed'
                     save_runs(runs)
                 raise
-            name = playlist_name(ident) or 'Spotify playlist ' + ident
+            name = (playlist or {}).get('name') or playlist_name(ident) or 'Spotify playlist ' + ident
             with STATE_LOCK:
                 runs = read_runs()
                 for run in runs:
@@ -365,6 +476,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Location', '/')
             self.end_headers()
         except urllib.error.HTTPError as error:
+            if self.path.startswith(('/profile/', '/spotify/')) or (self.path == '/submit' and os.environ.get('SPOTIFY_CLIENT_ID') and not locals().get('submission_id')):
+                self.send(page('<p>The connected service rejected this request. Check your connection in Profile and try again.</p><a href="/profile">Profile</a>'), status=502)
+                return
             self.log_error('n8n webhook returned HTTP %d', error.code)
             message = 'n8n rejected the webhook credentials (403); check N8N_WEBHOOK_TOKEN' if error.code == 403 else f'n8n webhook returned HTTP {error.code}; check N8N_WEBHOOK_URL'
             self.send(page('<div class="error-page"><div class="error">The download service could not accept this playlist. Check the connection and try again.</div><details class="track-details"><summary>Technical details</summary>' + html.escape(message) + '</details><a href="/">Back to import</a></div>'), status=502)
@@ -379,7 +493,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self.auth():
             return
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path in ('/file', '/zip'):
+        if parsed.path == '/profile':
+            self.send(page(profiles.settings_html(self.user, self.username)))
+        elif parsed.path == '/spotify/callback':
+            try:
+                profiles.spotify_finish(self.user, urllib.parse.parse_qs(parsed.query))
+                self.redirect('/profile')
+            except (ValueError, urllib.error.URLError, TimeoutError, KeyError):
+                self.send(page('<p>Spotify connection failed or expired. Try connecting again from Profile.</p><a href="/profile">Profile</a>'), status=400)
+        elif parsed.path in ('/file', '/zip'):
             self.download(parsed)
         elif parsed.path == '/transfers':
             self.send(self.transfer_panel().encode(), kind='text/html; charset=utf-8')
@@ -395,7 +517,7 @@ class Handler(BaseHTTPRequestHandler):
             relative = urllib.parse.parse_qs(parsed.query).get('path', [''])[0]
             if not relative:
                 raise ValueError('Missing path')
-            target = inside(relative)
+            target = inside(relative, self.download_root())
             if not target.exists():
                 raise FileNotFoundError(relative)
             if parsed.path == '/file':
@@ -421,10 +543,10 @@ class Handler(BaseHTTPRequestHandler):
                 # ponytail: ZipFile writes directly to the socket, avoiding a playlist-sized buffer.
                 with zipfile.ZipFile(self.wfile, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
                     for base, dirs, files in os.walk(target):
-                        dirs[:] = [d for d in dirs if inside(str((Path(base) / d).relative_to(ROOT))).is_dir()]
+                        dirs[:] = [d for d in dirs if inside(str((Path(base) / d).relative_to(self.download_root())), self.download_root()).is_dir()]
                         for name in files:
                             file = Path(base) / name
-                            if file.is_file() and file.resolve().is_relative_to(ROOT):
+                            if file.is_file() and file.resolve().is_relative_to(self.download_root()) and not (self.download_root() == ROOT and file.resolve().is_relative_to(ROOT / 'profiles')):
                                 archive.write(file, file.relative_to(target))
         except (ValueError, FileNotFoundError) as error:
             self.send(page('<div class="error">' + html.escape(str(error)) + '</div>'), status=400)
@@ -479,13 +601,14 @@ class Handler(BaseHTTPRequestHandler):
                                 tracks.append(track_update)
                             clean['tracks'] = tracks
                         run['workflow'] = {**previous, **clean}
+                        run['updated'] = datetime.now(timezone.utc).isoformat()
                         save_runs(runs)
             self.send(b'{}', kind='application/json')
         except (ValueError, TypeError) as error:
             self.send(page('<div class="error">' + html.escape(str(error)) + '</div>'), status=400)
 
     def transfer_panel(self):
-        transfers, error = transfer_snapshot()
+        transfers, error = self.transfers()
         if error:
             return '<div class="empty">' + html.escape(error) + '</div>'
         rows = []
@@ -508,8 +631,8 @@ class Handler(BaseHTTPRequestHandler):
         previous = None
         try:
             while True:
-                transfers, error = transfer_snapshot()
-                data = json.dumps({'transfers': transfers, 'runs': [run_view(run, transfers) for run in read_runs()[:8]], 'error': error, 'library': library_view(folder, sort, direction)}, ensure_ascii=False)
+                transfers, error = self.transfers()
+                data = json.dumps({'transfers': transfers, 'runs': [run_view(run, transfers) for run in self.runs()[:8]], 'error': error, 'library': library_view(folder, sort, direction, self.download_root())}, ensure_ascii=False)
                 digest = hashlib.sha256(data.encode()).digest()
                 self.wfile.write(b'data: ' + data.encode() + b'\n\n' if digest != previous else b': keepalive\n\n')
                 self.wfile.flush()
@@ -526,23 +649,23 @@ class Handler(BaseHTTPRequestHandler):
         direction = query.get('dir', ['asc'])[0]
         direction = direction if direction in ('asc', 'desc') else 'asc'
         sort_query = '&sort=' + sort + '&dir=' + direction
-        library = library_view(folder, sort, direction)
+        library = library_view(folder, sort, direction, self.download_root())
         crumbs = ['<a href="/?' + sort_query.lstrip('&') + '#files">Library</a>']
         current = Path()
         for part in Path(folder).parts if folder else []:
             current /= part
             crumbs.append('<span>›</span><a href="/?folder=' + urllib.parse.quote(str(current)) + sort_query + '#files">' + html.escape(part) + '</a>')
-        runs = read_runs()[:8]
+        runs = self.runs()[:8]
         missing = {(run['id'], run['submitted']): playlist_name(run['id']) or 'Spotify playlist ' + run['id'] for run in runs if not run.get('name')}
         if missing:
             with STATE_LOCK:
                 saved = read_runs()
                 for run in saved:
                     key = (run['id'], run['submitted'])
-                    if not run.get('name') and key in missing:
+                    if run.get('owner', 'owner') == self.user and not run.get('name') and key in missing:
                         run['name'] = missing[key]
                 save_runs(saved)
-            runs = read_runs()[:8]
+            runs = self.runs()[:8]
         body = '''<div data-view="start"><section class="import" id="start"><h1>Import a playlist</h1><form method="post" action="/submit" class="field" id="import-form"><input name="url" aria-label="Spotify playlist link" aria-describedby="import-hint import-feedback" placeholder="Paste a Spotify playlist link" autocomplete="off" spellcheck="false" required><button class="primary" type="submit">Import</button></form><div class="hint" id="import-hint">Spotify playlist links and URIs<kbd>⌘ / Ctrl K</kbd></div><div id="import-feedback" role="status"></div></section><section id="activity"><div class="sectionhead"><h2>Recent imports</h2><form id="clear-history" class="inline-form" method="post" action="/clear-history" onsubmit="return confirm('Clear import history? Downloaded files will be kept.')"><button class="danger" type="submit">Clear history</button></form></div><div class="list" id="run-list"></div></section></div>'''
         body += '''<section data-view="transfers" id="transfers"><h1>Downloads</h1><p class="queue-summary" id="queue-summary"></p><div class="notice" id="queue-notice" hidden><span id="queue-error"></span><button type="button" id="reconnect">Reconnect</button></div><div class="controls"><input id="transfer-search" type="search" placeholder="Search downloads" aria-label="Search downloads"><select id="transfer-status" aria-label="Filter download status"><option value="">All statuses</option><option value="downloading">Downloading</option><option value="queued">Queued</option><option value="failed">Failed</option><option value="completed">Complete</option><option value="unknown">Awaiting status</option></select><select id="transfer-sort" aria-label="Sort downloads"><option value="status">Active first</option><option value="newest">Newest first</option><option value="progress">Progress</option><option value="name">Name</option><option value="speed">Speed</option></select><button id="transfer-reverse" type="button" data-reverse="false" aria-pressed="false">Reverse order</button></div><div class="list" id="transfer-list"></div><button id="more-transfers" type="button" hidden>Show more</button></section>'''
         body += '<section data-view="files" id="files"><div class="sectionhead"><div><h1 style="margin-bottom:0">Library</h1><div class="crumbs">' + ''.join(crumbs) + '</div></div><a class="link" href="' + html.escape(self.path.split('#')[0], quote=True) + '#files">Refresh</a></div><form class="controls" method="get" action="/#files"><input id="library-search" type="search" placeholder="Search this folder" aria-label="Search this folder"><input type="hidden" name="folder" value="' + html.escape(folder, quote=True) + '"><select id="file-sort" name="sort" aria-label="Sort files"><option value="name"' + (' selected' if sort == 'name' else '') + '>Name</option><option value="type"' + (' selected' if sort == 'type' else '') + '>Type</option><option value="size"' + (' selected' if sort == 'size' else '') + '>Size</option><option value="modified"' + (' selected' if sort == 'modified' else '') + '>Modified</option></select><select name="dir" aria-label="File sort direction"><option value="asc"' + (' selected' if direction == 'asc' else '') + '>Ascending</option><option value="desc"' + (' selected' if direction == 'desc' else '') + '>Descending</option></select><button type="submit">Sort</button></form><section class="section" id="library-activity"><h2>Download activity</h2><div id="library-transfers" class="list"></div><button type="button" id="more-library-transfers" hidden>Show more</button></section><div class="list" id="library-list">' + (library['html'] or '') + '</div><p id="library-error" class="error" role="status"></p><p id="library-no-match" class="empty" hidden>No files match your search.</p></section>'

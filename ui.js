@@ -80,9 +80,11 @@ function replaceList(node, markup) {
   const focused = node.contains(document.activeElement)
     ? document.activeElement.closest("details[data-key]")?.dataset.key
     : null;
-  const active = node.contains(document.activeElement) ? document.activeElement : null;
-  const file = active?.closest('[data-path]')?.dataset.path;
-  const href = active?.getAttribute('href');
+  const active = node.contains(document.activeElement)
+    ? document.activeElement
+    : null;
+  const file = active?.closest("[data-path]")?.dataset.path;
+  const href = active?.getAttribute("href");
   const scroll = node.scrollTop;
   node.innerHTML = markup;
   node._markup = markup;
@@ -94,8 +96,15 @@ function replaceList(node, markup) {
       ?.querySelector("summary")
       ?.focus({ preventScroll: true });
   if (file) {
-    const row = [...node.querySelectorAll('[data-path]')].find(el => el.dataset.path === file);
-    [...(row?.querySelectorAll('a, button') || [])].find(el => el.tagName === active.tagName && el.getAttribute('href') === href)?.focus({preventScroll:true});
+    const row = [...node.querySelectorAll("[data-path]")].find(
+      (el) => el.dataset.path === file,
+    );
+    [...(row?.querySelectorAll("a, button") || [])]
+      .find(
+        (el) =>
+          el.tagName === active.tagName && el.getAttribute("href") === href,
+      )
+      ?.focus({ preventScroll: true });
   }
   node.scrollTop = scroll;
 }
@@ -112,70 +121,66 @@ function transferMarkup(rows) {
     groups.get(key).rows.push(t);
   }
   return [...groups]
-          .map(
-            ([key, g]) =>
-              '<details class="transfer-group" data-key="' +
-              esc(key) +
-              '" open><summary><span>' +
-              esc(g.name) +
-              '</span><span class="count">' +
-              g.rows.length +
-              " files</span></summary>" +
-              g.rows
-                .map((t) => {
-                  const detailKey =
-                    key +
-                    ":" +
-                    (t.id || t.batchId + ":" + t.username + ":" + t.name);
-                  return (
-                    '<article class="row transfer ' +
-                    (t.kind === "completed" ? "completed" : "") +
-                    '"><div class="transfer-top"><div><strong title="' +
-                    esc(t.name) +
-                    '">' +
-                    esc(t.name) +
-                    '</strong><div class="muted">' +
-                    esc(t.username || "Source unavailable") +
-                    "</div></div>" +
-                    badge(t.kind) +
-                    "</div>" +
-                    (t.kind === "downloading"
-                      ? progress(t.percent, t.name) +
-                        '<div class="transfer-bottom"><span>' +
-                        bytes(t.done) +
-                        (t.size ? " / " + bytes(t.size) : "") +
-                        (t.speed ? " · " + bytes(t.speed) + "/s" : "") +
-                        "</span><span>" +
-                        Math.round(t.percent) +
-                        "%</span></div>"
-                      : "") +
-                    '<details class="track-details" data-key="' +
-                    esc(detailKey) +
-                    '"><summary>File details</summary><dl><dt>Source</dt><dd>' +
-                    esc(t.username || "Unavailable") +
-                    "</dd><dt>Folder</dt><dd>" +
-                    esc(t.folder) +
-                    "</dd>" +
-                    (t.size
-                      ? "<dt>File size</dt><dd>" + bytes(t.size) + "</dd>"
-                      : "") +
-                    "<dt>Status</dt><dd>" +
-                    esc(t.state) +
-                    "</dd>" +
-                    (t.error
-                      ? "<dt>Problem</dt><dd>" + esc(t.error) + "</dd>"
-                      : "") +
-                    "</dl></details>" +
-                    (t.kind === "failed"
-                      ? '<div class="error">The download stopped. Check the source in file details.</div>'
-                      : "") +
-                    "</article>"
-                  );
-                })
-                .join("") +
-              "</details>",
-          )
-          .join("");
+    .map(
+      ([key, g]) =>
+        '<details class="transfer-group" data-key="' +
+        esc(key) +
+        '" open><summary><span>' +
+        esc(g.name) +
+        '</span><span class="count">' +
+        g.rows.length +
+        " files</span></summary>" +
+        g.rows
+          .map((t) => {
+            const detailKey =
+              key + ":" + (t.id || t.batchId + ":" + t.username + ":" + t.name);
+            return (
+              '<article class="row transfer ' +
+              (t.kind === "completed" ? "completed" : "") +
+              '"><div class="transfer-top"><div><strong title="' +
+              esc(t.name) +
+              '">' +
+              esc(t.name) +
+              '</strong><div class="muted">' +
+              esc(t.username || "Source unavailable") +
+              "</div></div>" +
+              badge(t.kind) +
+              "</div>" +
+              (t.kind === "downloading"
+                ? progress(t.percent, t.name) +
+                  '<div class="transfer-bottom"><span>' +
+                  bytes(t.done) +
+                  (t.size ? " / " + bytes(t.size) : "") +
+                  (t.speed ? " · " + bytes(t.speed) + "/s" : "") +
+                  "</span><span>" +
+                  Math.round(t.percent) +
+                  "%</span></div>"
+                : "") +
+              '<details class="track-details" data-key="' +
+              esc(detailKey) +
+              '"><summary>File details</summary><dl><dt>Source</dt><dd>' +
+              esc(t.username || "Unavailable") +
+              "</dd><dt>Folder</dt><dd>" +
+              esc(t.folder) +
+              "</dd>" +
+              (t.size
+                ? "<dt>File size</dt><dd>" + bytes(t.size) + "</dd>"
+                : "") +
+              "<dt>Status</dt><dd>" +
+              esc(t.state) +
+              "</dd>" +
+              (t.error ? "<dt>Problem</dt><dd>" + esc(t.error) + "</dd>" : "") +
+              "</dl></details>" +
+              (t.kind === "failed"
+                ? '<div class="error">The download stopped. Check the source in file details.</div>'
+                : "") +
+              "</article>"
+            );
+          })
+          .join("") +
+        "</details>",
+    )
+    .join("");
 }
 function renderTransfers() {
   const query = controls.search.value.trim().toLowerCase(),
@@ -238,7 +243,8 @@ function renderTransfers() {
     })
     .filter(Boolean);
   document.getElementById("queue-summary").textContent =
-    counts.join(" · ") || (receivedSnapshot ? "No downloads yet." : "Connecting…");
+    counts.join(" · ") ||
+    (receivedSnapshot ? "No downloads yet." : "Connecting…");
   document.getElementById("queue-notice").hidden = !snapshot.error;
   document.getElementById("queue-error").textContent = snapshot.error || "";
   replaceList(
@@ -250,7 +256,9 @@ function renderTransfers() {
             ? "No downloads match your filters."
             : snapshot.error
               ? "Downloads will appear when the connection is restored."
-              : !receivedSnapshot ? 'Loading downloads…' : 'No downloads yet. <a class="link" href="#start">Import a playlist</a>') +
+              : !receivedSnapshot
+                ? "Loading downloads…"
+                : 'No downloads yet. <a class="link" href="#start">Import a playlist</a>') +
           "</div>",
   );
   const more = document.getElementById("more-transfers");
@@ -296,10 +304,10 @@ function renderRuns() {
                   : r.phase === "unconfirmed"
                     ? "Awaiting confirmation"
                     : ["submitted", "submitting", "resolving"].includes(r.phase)
-                    ? "Resolving…"
-                    : r.phase === "queued"
-                      ? "Queued"
-                      : "In progress";
+                      ? "Resolving…"
+                      : r.phase === "queued"
+                        ? "Queued"
+                        : "In progress";
             const date = new Date(r.submitted),
               when = Number.isNaN(date.getTime())
                 ? ""
@@ -310,7 +318,8 @@ function renderRuns() {
                     minute: "2-digit",
                   });
             const limit = trackLimits.get(key) || 100;
-            const trackRows = r.tracks.slice(0, limit)
+            const trackRows = r.tracks
+              .slice(0, limit)
               .map(
                 (t, j) =>
                   '<div class="track-row"><span class="track-number">' +
@@ -372,7 +381,13 @@ function renderRuns() {
               '"><summary>View tracks</summary><div class="track-list">' +
               (trackRows ||
                 '<p class="muted">Track details have not arrived yet.</p>') +
-              '</div>'+(r.tracks.length>limit?'<button class="more-tracks" data-run="'+esc(key)+'" type="button">Show more tracks</button>':'')+'<a class="link" href="https://open.spotify.com/playlist/' +
+              "</div>" +
+              (r.tracks.length > limit
+                ? '<button class="more-tracks" data-run="' +
+                  esc(key) +
+                  '" type="button">Show more tracks</button>'
+                : "") +
+              '<a class="link" href="https://open.spotify.com/playlist/' +
               encodeURIComponent(r.id) +
               '" target="_blank" rel="noopener noreferrer">Open in Spotify ↗</a></details></div></article>'
             );
@@ -396,17 +411,22 @@ function route() {
     { files: "Library", transfers: "Downloads", start: "Import" }[view] +
     " · Playlist desk";
 }
-for (const link of document.querySelectorAll('.nav a')) link.addEventListener('click', e => {
-  e.preventDefault(); location.hash = link.hash;
-});
-runList.addEventListener('click', e => {
-  const button = e.target.closest('.more-tracks');
+for (const link of document.querySelectorAll(".nav a"))
+  link.addEventListener("click", (e) => {
+    if (!link.hash) return;
+    e.preventDefault();
+    location.hash = link.hash;
+  });
+runList.addEventListener("click", (e) => {
+  const button = e.target.closest(".more-tracks");
   if (!button) return;
   const key = button.dataset.run;
   trackLimits.set(key, (trackLimits.get(key) || 100) + 100);
   renderRuns();
-  const details = [...runList.querySelectorAll('details[data-key]')].find(el => el.dataset.key === key);
-  details?.querySelector('summary')?.focus({preventScroll:true});
+  const details = [...runList.querySelectorAll("details[data-key]")].find(
+    (el) => el.dataset.key === key,
+  );
+  details?.querySelector("summary")?.focus({ preventScroll: true });
 });
 window.addEventListener("hashchange", route);
 route();
@@ -436,8 +456,8 @@ let libraryLimit = 100;
 function renderLibrary() {
   const library = snapshot.library;
   if (library) {
-    replaceList(document.getElementById('library-list'), library.html || '');
-    document.getElementById('library-error').textContent = library.error || '';
+    replaceList(document.getElementById("library-list"), library.html || "");
+    document.getElementById("library-error").textContent = library.error || "";
   }
   let count = 0;
   for (const row of document.querySelectorAll(".library-row")) {
@@ -450,16 +470,34 @@ function renderLibrary() {
   document.getElementById("library-no-match").hidden =
     !!count || !librarySearch.value;
   const query = librarySearch.value.trim().toLowerCase();
-  const rows = snapshot.transfers.filter(t => !query || (t.name + ' ' + t.username).toLowerCase().includes(query));
-  rows.sort((a,b) => (a.kind === 'completed') - (b.kind === 'completed') || String(b.date).localeCompare(String(a.date)));
-  replaceList(document.getElementById('library-transfers'), transferMarkup(rows.slice(0, libraryLimit)));
-  document.getElementById('library-activity').hidden = !rows.length;
-  const more = document.getElementById('more-library-transfers');
+  const rows = snapshot.transfers.filter(
+    (t) => !query || (t.name + " " + t.username).toLowerCase().includes(query),
+  );
+  rows.sort(
+    (a, b) =>
+      (a.kind === "completed") - (b.kind === "completed") ||
+      String(b.date).localeCompare(String(a.date)),
+  );
+  replaceList(
+    document.getElementById("library-transfers"),
+    transferMarkup(rows.slice(0, libraryLimit)),
+  );
+  document.getElementById("library-activity").hidden = !rows.length;
+  const more = document.getElementById("more-library-transfers");
   more.hidden = rows.length <= libraryLimit;
-  more.textContent = 'Show more (' + Math.max(0, rows.length - libraryLimit) + ' remaining)';
+  more.textContent =
+    "Show more (" + Math.max(0, rows.length - libraryLimit) + " remaining)";
 }
-librarySearch.addEventListener('input', () => { libraryLimit = 100; renderLibrary(); });
-document.getElementById('more-library-transfers').addEventListener('click', () => { libraryLimit += 100; renderLibrary(); });
+librarySearch.addEventListener("input", () => {
+  libraryLimit = 100;
+  renderLibrary();
+});
+document
+  .getElementById("more-library-transfers")
+  .addEventListener("click", () => {
+    libraryLimit += 100;
+    renderLibrary();
+  });
 renderLibrary();
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
