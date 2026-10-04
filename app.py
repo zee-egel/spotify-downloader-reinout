@@ -150,8 +150,8 @@ def run_view(run, transfers):
     for track in records:
         batch = str(track.get('batchId') or '')
         files = by_batch.get(batch, []) if batch else []
-        # An exact selected peer + filename is known before slskd assigns the batch ID.
-        if not batch and track.get('status') == 'matching':
+        # Match the selected file when the batch response differs from the transfer listing.
+        if not files and track.get('username') and track.get('filename') and track.get('youtubeStatus') != 'completed':
             files = by_file.get((track.get('username'), track.get('filename')), [])
             files = [file for file in files if not file.get('date') or file['date'] >= (run.get('submitted') or '')]
         kinds = [file['kind'] for file in files]
@@ -270,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             for track in (state.get('tracks') or []) + (state.get('downloads') or []):
                 if track.get('batchId'):
                     batches.setdefault(track['batchId'], set()).add(run.get('owner', 'owner'))
-                elif track.get('username') and track.get('filename'):
+                if track.get('username') and track.get('filename') and track.get('youtubeStatus') != 'completed':
                     selections.setdefault((track['username'], track['filename']), []).append(run)
         visible = []
         for transfer in transfers:

@@ -207,3 +207,11 @@ with tempfile.TemporaryDirectory() as temporary:
     webhook.shutdown()
     slskd.shutdown()
 print('Local smoke checks passed')
+
+# The queue response and transfer listing may expose different batch IDs.
+track = {'spotifyId':'one', 'status':'queued', 'batchId':'queue-batch', 'username':'peer', 'filename':'song.mp3'}
+run = {'submitted':'2026-10-04T06:00:00+00:00', 'workflow':{'downloads':[track]}}
+transfer = {'batchId':'transfer-batch', 'username':'peer', 'filename':'song.mp3', 'kind':'completed', 'percent':100, 'date':'2026-10-04T06:01:00'}
+assert app.run_view(run, [transfer])['tracks'][0]['status'] == 'completed'
+transfer['date'] = '2026-10-03T06:00:00'
+assert app.run_view(run, [transfer])['tracks'][0]['status'] == 'queued locally'
