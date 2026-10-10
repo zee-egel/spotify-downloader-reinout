@@ -534,6 +534,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send(page(render_html('delete-error')), status=500)
 
     def do_GET(self):
+        if urllib.parse.urlparse(self.path).path == '/favicon.ico':
+            self.send(Path(__file__).with_name('favicon.ico').read_bytes(), kind='image/vnd.microsoft.icon')
+            return
         if self.path == '/health':
             try:
                 with urllib.request.urlopen(os.environ.get('SLSKD_URL', '').rstrip('/') + '/health', timeout=3) as response:
