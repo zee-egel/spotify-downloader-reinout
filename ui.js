@@ -22,6 +22,11 @@ const bytes = (n) => {
   return (i ? n.toFixed(1) : Math.round(n)) + " " + u[i];
 };
 const labels = {
+  "youtube searching": "Searching YouTube…",
+  "youtube checking": "Checking YouTube match…",
+  "youtube downloading": "Downloading from YouTube",
+  "youtube validating": "Checking audio…",
+  unavailable: "Unavailable",
   pending: "Waiting to search",
   searching: "Searching…",
   matching: "Queueing…",
@@ -43,9 +48,9 @@ const labels = {
 const label = (s) => labels[s] || "Needs attention";
 const badge = (s) =>
   '<span class="badge ' +
-  (s === "downloading"
+  (s === "downloading" || s.startsWith("youtube ")
     ? "active"
-    : /fail|error|timeout|no.?match|review/.test(s)
+    : /fail|error|timeout|no.?match|review|unavailable/.test(s)
       ? "failed"
       : "") +
   '">' +
@@ -280,11 +285,15 @@ function renderRuns() {
             const c = r.counts,
               total = r.total,
               complete = c.completed || 0,
+              handled = r.handled ?? complete,
+              finished = r.finished || r.phase === "final",
               key = r.submissionId || r.submitted || String(i);
             const counts = [
               "downloading",
               "queued locally",
               "queued remotely",
+              "unavailable",
+              "already/duplicate",
               "failed",
               "search timeout",
               "search error",
@@ -297,13 +306,14 @@ function renderRuns() {
                   c[k] +
                   " " +
                   ({
+                    "already/duplicate": "already queued",
                     "queued locally": "queued",
                     "queued remotely": "waiting for source",
                   }[k] || k),
               );
             const status =
-              total && complete >= total
-                ? "Complete"
+              finished
+                ? (total && complete >= total ? "Complete" : "Finished")
                 : r.phase === "final"
                   ? "Finished"
                   : r.phase === "unconfirmed"
@@ -336,6 +346,7 @@ function renderRuns() {
                   '</span><div class="muted">' +
                   esc(t.artist) +
                   "</div>" +
+                  (t.reason ? '<div class="muted">' + esc(t.reason) + "</div>" : "") +
                   (t.source
                     ? '<details class="track-details" data-key="' +
                       esc(key + ":track:" + j) +
@@ -346,7 +357,7 @@ function renderRuns() {
                     : "") +
                   "</div>" +
                   badge(t.status) +
-                  (t.status === "downloading"
+                  ((t.status === "downloading" || t.status === "youtube downloading") && t.percent != null
                     ? '<span class="count">' +
                       Math.round(t.percent) +
                       "%</span>"
@@ -354,6 +365,8 @@ function renderRuns() {
                   "</div>",
               )
               .join("");
+            const active = r.tracks.find(t => t.status.startsWith("youtube ")) ||
+              r.tracks.find(t => ["downloading", "searching", "matching"].includes(t.status));
             return (
               '<article class="run"><div class="run-header"><span class="artwork" aria-hidden="true">♫</span><div class="run-info"><h3 class="run-title" title="' +
               esc(r.name) +
@@ -371,14 +384,15 @@ function renderRuns() {
               "</span></div>" +
               (total
                 ? progress(
-                    (complete / total) * 100,
-                    "Completed tracks",
-                    complete >= total,
+                    finished ? 100 : (handled / total) * 100,
+                    "Tracks handled",
+                    finished,
                   )
                 : "") +
+              (!finished && active ? '<p class="muted" role="status">' + esc(label(active.status) + ' · ' + active.artist + ' — ' + active.title) + (active.percent != null && /downloading/.test(active.status) ? ' · ' + Math.round(active.percent) + '%' : '') + '</p>' : '') +
               '<div class="run-details"><div class="run-counts">' +
               (total != null
-                ? complete + " of " + total + " complete"
+                ? handled + " of " + total + " handled · " + complete + " downloaded"
                 : "Waiting for track information") +
               (counts.length ? " · " + esc(counts.join(" · ")) : "") +
               '</div><details data-key="' +

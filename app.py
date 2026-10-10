@@ -163,17 +163,28 @@ def run_view(run, transfers):
             status = next((kind for kind in ('completed', 'downloading', 'queued remotely', 'queued locally', 'failed') if kind in kinds), status)
         if track.get('fallbackStatus') == 'queued' and status == 'unknown':
             status = 'trying another source'
+        youtube = (run.get('youtubeProgress') or {}).get(track.get('spotifyId')) or {}
+        if track.get('youtubeAttempted'):
+            status = 'completed' if track.get('youtubeStatus') == 'completed' else 'unavailable'
+        if youtube:
+            status = youtube['status']
+        if state.get('phase') == 'final' and status not in ('completed', 'already/duplicate'):
+            status = 'unavailable'
         tracks.append({'batchId': batch or next((file['batchId'] for file in files), ''),
             'spotifyId': track.get('spotifyId') or '', 'artist': track.get('artist') or '', 'title': track.get('title') or '',
-            'status': status, 'fallback': bool(track.get('fallbackAttempted')),
-            'downloadSource': ('youtube' if track.get('youtubeStatus') == 'completed' or (track.get('fallbackSource') == 'YouTube' and not batch) else 'soulseek' if batch or track.get('username') else '') if status == 'completed' else '',
-            'source': track.get('fallbackSource') if track.get('fallbackAttempted') else next((f['username'] for f in files), track.get('username') or ''),
-            'percent': max((file['percent'] for file in files), default=0)})
-    counts = {kind: sum(track['status'] == kind for track in tracks) for kind in ('completed', 'downloading', 'queued locally', 'queued remotely', 'failed', 'search timeout', 'search error', 'unknown')}
+            'status': status, 'reason': youtube.get('reason') or (track.get('youtubeResult') or {}).get('reason') or track.get('reason') or '',
+            'fallback': bool(track.get('fallbackAttempted') or youtube),
+            'downloadSource': ('youtube' if youtube or track.get('youtubeStatus') == 'completed' or (track.get('fallbackSource') == 'YouTube' and not batch) else 'soulseek' if batch or track.get('username') else '') if status == 'completed' else '',
+            'source': 'YouTube' if youtube else track.get('fallbackSource') if track.get('fallbackAttempted') else next((f['username'] for f in files), track.get('username') or ''),
+            'percent': youtube.get('percent') if youtube else max((file['percent'] for file in files), default=0)})
+    counts = {kind: sum(track['status'] == kind for track in tracks) for kind in ('completed', 'downloading', 'queued locally', 'queued remotely', 'failed', 'search timeout', 'search error', 'unknown', 'unavailable', 'already/duplicate')}
     counts['fallback'] = sum(track['fallback'] for track in tracks)
-    counts['no match'] = max(state.get('noMatch') or 0, sum(track['status'] == 'no match' for track in tracks))
-    counts['needs review'] = max(state.get('reviewRequired') or 0, sum(track['status'] == 'needs review' for track in tracks))
-    return {'id': run.get('id'), 'submissionId': run.get('submissionId'), 'name': state.get('playlistName') or run.get('name'), 'submitted': run.get('submitted'),
+    counts['no match'] = sum(track['status'] == 'no match' for track in tracks)
+    counts['needs review'] = sum(track['status'] == 'needs review' for track in tracks)
+    handled = sum(track['status'] in ('completed', 'unavailable', 'already/duplicate') for track in tracks)
+    total = state.get('totalSpotifyTracks')
+    finished = state.get('phase') == 'final' or bool(total and handled >= total and not state.get('resolving'))
+    return {'handled': total if finished and total is not None else handled, 'finished': finished, 'id': run.get('id'), 'submissionId': run.get('submissionId'), 'name': state.get('playlistName') or run.get('name'), 'submitted': run.get('submitted'),
         'phase': 'resolving' if state.get('resolving') else state.get('phase') or run.get('status') or 'submitted', 'total': state.get('totalSpotifyTracks'),
         'counts': counts, 'tracks': tracks}
 
@@ -551,7 +562,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send(b'{"status":"failed","reason":"YouTube downloader busy"}', kind='application/json', status=409)
             return
         try:
-            result = main(urllib.parse.quote(json.dumps(payload)))
+            last_update = [0, None]
+            def report(**update):
+                now = time.monotonic()
+                if update['status'] == last_update[1] and now - last_update[0] < 1:
+                    return
+                with STATE_LOCK:
+                    runs = read_runs()
+                    run = next((r for r in runs if r.get('submissionId') == payload.get('submissionId')
+                                and r.get('submissionId') and r.get('owner', 'owner') == payload.get('profileId', 'owner')), None)
+                    if run:
+                        run.setdefault('youtubeProgress', {})[payload['track']['spotifyId']] = update
+                        save_runs(runs)
+                last_update[:] = [now, update['status']]
+            result = main(urllib.parse.quote(json.dumps(payload)), progress=report)
+            report(status='completed' if result['status'] == 'completed' else 'unavailable',
+                   percent=100 if result['status'] == 'completed' else None,
+                   reason=result.get('reason', ''), source='YouTube')
         finally:
             YOUTUBE_LOCK.release()
         self.send(json.dumps(result).encode(), kind='application/json')
@@ -615,11 +642,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(track, dict) or not isinstance(track.get('spotifyId'), str) or not track['spotifyId']:
                     raise ValueError('Invalid track update')
                 result = {}
-                for key in ('spotifyId', 'spotifyUrl', 'artist', 'title', 'status', 'username', 'filename', 'batchId'):
+                for key in ('spotifyId', 'spotifyUrl', 'artist', 'title', 'status', 'username', 'filename', 'batchId', 'reason', 'youtubeStatus', 'fallbackSource'):
                     if key in track:
                         if track[key] is not None and not isinstance(track[key], str):
                             raise ValueError('Invalid track field')
                         result[key] = track[key] or ''
+                for key in ('youtubeAttempted', 'fallbackAttempted'):
+                    if key in track:
+                        result[key] = bool(track[key])
                 return result
             if 'tracks' in state:
                 if not isinstance(state['tracks'], list):

@@ -4,8 +4,10 @@ import math
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
+import threading
 import tempfile
 import time
 import unicodedata
@@ -54,7 +56,7 @@ def validate(track):
         raise ValueError('Track needs manual matching')
 
 
-def download(job, request):
+def download(job, request, progress=None):
     track = request['track']
     validate(track)
     deadline = time.monotonic() + 240
@@ -65,6 +67,8 @@ def download(job, request):
 
     base = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
             '--js-runtimes', 'node', '--socket-timeout', '15', '--retries', '1', '--fragment-retries', '1']
+    if progress:
+        progress(status='youtube searching', percent=None)
     query = track['primaryArtist'] + ' ' + track['title'] + ' audio'
     search = json.loads(run(base + ['--flat-playlist', '-J', 'ytsearch10:' + query]).stdout)
     candidates = [v for v in search.get('entries', []) if v and matches(track, v)]
@@ -75,12 +79,43 @@ def download(job, request):
         if not re.fullmatch(r'[A-Za-z0-9_-]{11}', ident):
             continue
         url = 'https://www.youtube.com/watch?v=' + ident
+        if progress:
+            progress(status='youtube checking', percent=None)
         info = json.loads(run(base + ['--skip-download', '-J', url]).stdout)
         if not matches(track, info):
             continue
         with tempfile.TemporaryDirectory(dir=job) as temporary:
             output = str(Path(temporary) / 'audio.%(ext)s')
-            downloaded = json.loads(run(base + ['-f', 'bestaudio', '--no-simulate', '-J', '-o', output, url]).stdout)
+            args = base + ['-f', 'bestaudio', '--no-simulate', '-J', '-o', output, url]
+            if progress:
+                progress(status='youtube downloading', percent=None)
+                args += ['--progress', '--newline', '--progress-delta', '1',
+                         '--progress-template', 'download:YT_PROGRESS:%(progress._percent_str)s']
+                # JSON stays on stdout; only our explicit progress template is parsed.
+                with tempfile.TemporaryFile(mode='w+') as captured:
+                    process = subprocess.Popen(args, stdout=captured, stderr=subprocess.PIPE, text=True, start_new_session=True)
+                    def updates():
+                        for line in process.stderr:
+                            match = re.search(r'YT_PROGRESS:\s*([\d.]+)%', line)
+                            if match:
+                                progress(status='youtube downloading', percent=min(100, float(match[1])))
+                    reader = threading.Thread(target=updates, daemon=True)
+                    reader.start()
+                    try:
+                        process.wait(timeout=max(.1, min(90, deadline - time.monotonic())))
+                    finally:
+                        if process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                        reader.join()
+                        process.stderr.close()
+                    if process.returncode:
+                        raise subprocess.CalledProcessError(process.returncode, args)
+                    captured.seek(0)
+                    downloaded = json.load(captured)
+                progress(status='youtube validating', percent=None)
+            else:
+                downloaded = json.loads(run(args).stdout)
             files = [p for p in Path(temporary).iterdir() if p.suffix in ('.webm', '.m4a', '.opus', '.ogg')]
             if len(files) != 1:
                 raise ValueError('No complete audio file')
@@ -116,7 +151,7 @@ def download(job, request):
     return {'status': 'no_match', 'reason': 'No YouTube result matched artist, title, version and duration'}
 
 
-def main(encoded):
+def main(encoded, progress=None):
     from urllib.parse import unquote
     try:
         if len(encoded) > 65536:
@@ -132,7 +167,7 @@ def main(encoded):
                 raise ValueError('Invalid profile destination')
             root = target
         with tempfile.TemporaryDirectory() as temporary:
-            return download(Path(temporary), {'root': str(root), 'track': payload['track']})
+            return download(Path(temporary), {'root': str(root), 'track': payload['track']}, progress)
     except subprocess.TimeoutExpired:
         return {'status': 'failed', 'reason': 'YouTube search/download timed out'}
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError):

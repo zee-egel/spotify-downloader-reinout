@@ -29,9 +29,15 @@
 5. Configure a Railway TCP proxy for slskd peer traffic and verify actual Soulseek connectivity before switching playlists. Railway assigns a public proxy address/port; slskd's advertised peer address and port must route back to the listener. Exposing port 50300 alone does not guarantee this because the outbound address may differ from the TCP proxy address. If peers cannot connect, use a compatible forwarded-port VPN/SOCKS setup or keep the downloader on a host with controllable peer networking; this image does not solve that networking limitation.
 6. After deploying, `/health` must return 200, the authenticated slskd UI must report a Soulseek connection, and a small import must produce a file visible in Library. Restart the service and confirm both history and the file survive. Allocate enough volume storage for your music library.
 
-The YouTube endpoint accepts JSON `{ "profileId": "owner", "track": { ... } }` with `X-Playlist-Token: <N8N_WEBHOOK_TOKEN>`, validates track metadata, and permits one active fallback download at a time. It is synchronous; a disconnected request may still finish on the server, so do not automatically retry uncertain requests. The endpoint returns the same `completed`, `no_match`, or `failed` JSON as the command-line downloader.
+The YouTube endpoint accepts JSON `{ "profileId": "owner", "submissionId": "...", "track": { ... } }` with `X-Playlist-Token: <N8N_WEBHOOK_TOKEN>`, validates track metadata, and permits one active fallback download at a time. It is synchronous; a disconnected request may still finish on the server, so do not automatically retry uncertain requests. The endpoint returns the same `completed`, `no_match`, or `failed` JSON as the command-line downloader.
 
 Build locally with `docker build -f Dockerfile.railway -t playlist-desk-railway .`. Railway configuration references: [config as code](https://docs.railway.com/config-as-code/reference), [persistent volumes](https://docs.railway.com/volumes), [TCP proxy](https://docs.railway.com/networking/tcp-proxy). Live Railway deployment and peer connectivity require verification in your project.
+
+## Playlist completion updates
+
+`workflow_completion.py` patches a fresh Railway workflow export to try YouTube immediately for unmatched, ambiguous, or timed-out searches. Apply it after the YouTube and Railway patches, publish the resulting workflow, and deploy the dashboard changes. Failed transfers can recover without the initial five-minute delay; active stalled transfers still require safe cancellation before replacement. Completion polling runs every ten seconds and immediately after a YouTube result.
+
+Pass the submission ID to `/youtube-download` to display live search, match checking, download percentage, and audio validation stages on the homepage. The playlist bar counts tracks handled, including unavailable tracks, while the downloaded count remains separate. Unknown transfer state still uses the existing monitoring timeout.
 
 ## YouTube fallback (workflow installation required)
 
