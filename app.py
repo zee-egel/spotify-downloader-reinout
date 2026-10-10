@@ -22,6 +22,7 @@ ROOT = Path(os.environ.get('DOWNLOADS_ROOT', './downloads')).resolve()
 STATE = Path(os.environ.get('STATE_FILE', './state.json'))
 PORT = int(os.environ.get('PORT', '8080'))
 STATE_LOCK = threading.Lock()
+YOUTUBE_LOCK = threading.Lock()
 
 
 def playlist_id(value):
@@ -371,6 +372,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if self.path == '/youtube-download':
+            self.youtube_download()
+            return
         if self.path in ('/workflow-status', '/workflow-notify'):
             self.workflow_status() if self.path == '/workflow-status' else self.workflow_notify()
             return
@@ -496,6 +500,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send(page('<div class="error">Could not delete this item; check the downloads directory permissions.</div><p><a href="/">Return to dashboard</a></p>'), status=500)
 
     def do_GET(self):
+        if self.path == '/health':
+            try:
+                with urllib.request.urlopen(os.environ.get('SLSKD_URL', '').rstrip('/') + '/health', timeout=3) as response:
+                    self.send(b'OK', kind='text/plain', status=200 if response.status == 200 else 503)
+            except (ValueError, OSError):
+                self.send(b'Download service unavailable', kind='text/plain', status=503)
+            return
         if not self.auth():
             return
         parsed = urllib.parse.urlparse(self.path)
@@ -517,6 +528,33 @@ class Handler(BaseHTTPRequestHandler):
             self.dashboard()
         else:
             self.send_error(404)
+
+    def youtube_download(self):
+        expected = os.environ.get('N8N_WEBHOOK_TOKEN', '')
+        if not expected or not hmac.compare_digest(self.headers.get('X-Playlist-Token', ''), expected):
+            self.send_error(403)
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+            if not 0 < length <= 65536:
+                raise ValueError('Invalid request size')
+            payload = json.loads(self.rfile.read(length))
+            from youtube_fallback import main, validate
+            if not isinstance(payload, dict) or payload.get('profileId', 'owner') not in ('owner', 'extra'):
+                raise ValueError('Invalid profile')
+            validate(payload.get('track'))
+        except (ValueError, TypeError, UnicodeError):
+            self.send(b'{"status":"failed","reason":"Invalid YouTube request"}', kind='application/json', status=400)
+            return
+        # ponytail: one download at a time; move to a durable worker if more accounts need it.
+        if not YOUTUBE_LOCK.acquire(blocking=False):
+            self.send(b'{"status":"failed","reason":"YouTube downloader busy"}', kind='application/json', status=409)
+            return
+        try:
+            result = main(urllib.parse.quote(json.dumps(payload)))
+        finally:
+            YOUTUBE_LOCK.release()
+        self.send(json.dumps(result).encode(), kind='application/json')
 
     def download(self, parsed):
         try:

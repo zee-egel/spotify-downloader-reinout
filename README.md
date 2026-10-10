@@ -1,6 +1,41 @@
 # Playlist desk
 
-## YouTube fallback (n8n only; deployment required)
+## Railway: dashboard and slskd together
+
+`railway.json` selects `Dockerfile.railway`, which runs the dashboard and slskd 0.26.0 in one service. Both run as UID 1000 and use the same downloads directory. The original `Dockerfile` and Pi Compose deployment remain available. The Railway image also includes yt-dlp, Node 22, and ffprobe for YouTube fallback.
+
+1. Attach the service's persistent volume at `/data`. Back up existing state before changing the mount path: `runs.json` and its sibling `profiles.sqlite3` must be moved to `/data/state/` to retain history, Spotify tokens, and Telegram settings. Existing songs on the Pi are not automatically copied. Do not run the old and new slskd instances simultaneously with the same Soulseek login.
+2. Set the following Railway variables (the paths and port are also image defaults):
+
+   ```env
+   DOWNLOADS_ROOT=/data/downloads
+   STATE_FILE=/data/state/runs.json
+   SLSKD_APP_DIR=/data/slskd
+   APP_DIR=/data/slskd
+   SLSKD_DOWNLOADS_DIR=/data/downloads
+   SLSKD_INCOMPLETE_DIR=/data/incomplete
+   SLSKD_URL=http://127.0.0.1:5030
+   PORT=8080
+   SLSKD_SLSK_USERNAME=<Soulseek username>
+   SLSKD_SLSK_PASSWORD=<Soulseek password>
+   SLSKD_API_KEY=<16–255 character API key, matching the n8n slskd credential>
+   SLSKD_USERNAME=<separate slskd web UI username>
+   SLSKD_PASSWORD=<strong slskd web UI password>
+   ```
+
+   Keep `APP_USER`, `APP_PASSWORD`, `APP_PUBLIC_URL`, Spotify variables, `N8N_WEBHOOK_URL`, and `N8N_WEBHOOK_TOKEN`. `COMPLETED_DOWNLOADS_HOST_PATH` and `SLSKD_DOCKER_NETWORK` are Pi Compose settings and have no effect on Railway. Leave the Railway start command unset; the image entrypoint starts both processes and stops the service if either exits. Leave replicas at one. Startup creates the volume directories and assigns them to UID 1000; if migrating root-owned existing files, assign those files to UID 1000 too. Do not override `RAILWAY_RUN_UID` to a non-root UID: startup needs root to prepare Railway's root-owned mount, then drops privileges for both apps.
+3. Keep `dj.reinout.dance` targeting port **8080**. Add a second HTTPS domain on the same service, such as `slskd.reinout.dance`, targeting port **5030**. This exposes slskd's authenticated UI/API to n8n on the Pi. Do not disable slskd authentication or use the default UI credentials. The dashboard uses localhost, not this public domain.
+4. Export the latest n8n workflow and run `python3 workflow_railway.py before.json after.json https://slskd.reinout.dance`. Review the resulting URLs, apply the update to n8n, and publish. The patch preserves existing credentials and replaces literal slskd `/api/v0` origins. If URLs use variables or expressions for their host, update those separately. Keep dashboard callbacks pointed at `https://dj.reinout.dance`. It also replaces an installed YouTube Execute Command node with a POST to `/youtube-download` using the existing `X-Playlist-Token` callback credential and a five-minute HTTP timeout. If YouTube nodes are not installed yet, apply `workflow_youtube.py` first, then this patch. Running downloads retain their old workflow; switch only when existing work is finished.
+5. Configure a Railway TCP proxy for slskd peer traffic and verify actual Soulseek connectivity before switching playlists. Railway assigns a public proxy address/port; slskd's advertised peer address and port must route back to the listener. Exposing port 50300 alone does not guarantee this because the outbound address may differ from the TCP proxy address. If peers cannot connect, use a compatible forwarded-port VPN/SOCKS setup or keep the downloader on a host with controllable peer networking; this image does not solve that networking limitation.
+6. After deploying, `/health` must return 200, the authenticated slskd UI must report a Soulseek connection, and a small import must produce a file visible in Library. Restart the service and confirm both history and the file survive. Allocate enough volume storage for your music library.
+
+The YouTube endpoint accepts JSON `{ "profileId": "owner", "track": { ... } }` with `X-Playlist-Token: <N8N_WEBHOOK_TOKEN>`, validates track metadata, and permits one active fallback download at a time. It is synchronous; a disconnected request may still finish on the server, so do not automatically retry uncertain requests. The endpoint returns the same `completed`, `no_match`, or `failed` JSON as the command-line downloader.
+
+Build locally with `docker build -f Dockerfile.railway -t playlist-desk-railway .`. Railway configuration references: [config as code](https://docs.railway.com/config-as-code/reference), [persistent volumes](https://docs.railway.com/volumes), [TCP proxy](https://docs.railway.com/networking/tcp-proxy). Live Railway deployment and peer connectivity require verification in your project.
+
+## YouTube fallback (workflow installation required)
+
+For the combined Railway service, use the HTTP endpoint and workflow patch described above. The Execute Command setup below is for downloads stored on the n8n host.
 
 `workflow_youtube.py` patches a fresh export of the live workflow. Generate the update body with `python3 workflow_youtube.py before.json after.json`. Preserve current credentials and profile routing; do not apply an old export over newer edits. The dashboard app requires no YouTube endpoint or dependencies.
 
