@@ -132,6 +132,8 @@ def download(job, request, progress=None):
 
     base = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
             '--js-runtimes', 'node', '--socket-timeout', '15', '--retries', '1', '--fragment-retries', '1']
+    if proxy := os.environ.get('YOUTUBE_PROXY'):
+        base += ['--proxy', proxy]
     queries = list(dict.fromkeys([
         track['primaryArtist'] + ' ' + track['title'] + ' audio',
         track['primaryArtist'] + ' ' + recording_title(track['title']) + ' audio',

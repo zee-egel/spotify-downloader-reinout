@@ -50,6 +50,25 @@ stop() {
 trap 'stop; exit 0' TERM INT
 trap stop EXIT
 umask "$SLSKD_UMASK"
+if [[ -n "${YOUTUBE_EXIT_NODE:-}" ]]; then
+    : "${TS_AUTHKEY:?Set TS_AUTHKEY to join the Tailscale network}"
+    tailscale_state="$(dirname "$STATE_FILE")/tailscale"
+    tailscale_socket=/tmp/playlist-tailscaled.sock
+    install -d -m 700 "$tailscale_state"
+    # ponytail: userspace SOCKS routes only yt-dlp through the Pi; no system VPN routing.
+    tailscaled --tun=userspace-networking --state="$tailscale_state/tailscaled.state" \
+        --socket="$tailscale_socket" --socks5-server=127.0.0.1:1055 &
+    pids+=("$!")
+    for ((attempt=0; attempt<30; attempt++)); do
+        [[ -S "$tailscale_socket" ]] && break
+        sleep 1
+    done
+    tailscale --socket="$tailscale_socket" up --auth-key="$TS_AUTHKEY" \
+        --hostname=disc-situation-railway --accept-dns=false \
+        --exit-node="$YOUTUBE_EXIT_NODE" --timeout=60s
+    export YOUTUBE_PROXY=socks5://127.0.0.1:1055
+    echo 'YouTube proxy connected through the configured Tailscale exit node.'
+fi
 # Share completed audio from both profiles; keep staging files and non-audio out.
 # CLI options ensure a persisted slskd.yml cannot silently disable this share.
 gosu slskd /slskd/slskd --app-dir "$SLSKD_APP_DIR" \
