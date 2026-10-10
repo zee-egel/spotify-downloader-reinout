@@ -266,7 +266,7 @@ def library_view(folder='', sort='name', direction='asc', root=None):
         return {'html': None, 'error': 'This folder is unavailable. It may have moved or been removed.'}
 
 
-def page(body, title='Playlist desk'):
+def page(body, title='The Disc Situation'):
     is_profile = 'class="profile-page"' in body
     return render_html(
         'base',
@@ -332,7 +332,7 @@ class Handler(BaseHTTPRequestHandler):
             profiles.save_telegram(self.user, form.get('token', [''])[0], form.get('chat', [''])[0].strip())
         elif self.path == '/profile/telegram-test':
             settings = profiles.load(self.user).get('telegram') or {}
-            profiles.telegram(self.user, 'sendMessage', {'chat_id': settings.get('chat'), 'text': 'Your Playlist desk bot is connected.'})
+            profiles.telegram(self.user, 'sendMessage', {'chat_id': settings.get('chat'), 'text': 'Your bot is connected to The Disc Situation.'})
         elif self.path == '/profile/telegram-disconnect':
             profiles.update(self.user, telegram=None)
         self.redirect('/profile')
@@ -389,7 +389,7 @@ class Handler(BaseHTTPRequestHandler):
             ok = False
         if not ok:
             self.send_response(401)
-            self.send_header('WWW-Authenticate', 'Basic realm="Playlist desk"')
+            self.send_header('WWW-Authenticate', 'Basic realm="The Disc Situation"')
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
         return ok

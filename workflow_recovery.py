@@ -69,6 +69,12 @@ def patch(workflow):
     for name in ('Download YouTube Audio', 'Download Unmatched Track'):
         node = nodes.get(name)
         if node and node['type'] == 'n8n-nodes-base.httpRequest':
+            # Avoid the failing nested expression; the downloader needs only normalized metadata.
+            params = node['parameters']
+            if 'jsonBody' in params:
+                params['jsonBody'] = params['jsonBody'].replace(
+                    "{...$('Normalize Tracks').all().find(i => i.json.spotifyId === $json.spotifyId).json, ...$json}",
+                    "$('Normalize Tracks').all().find(i => i.json.spotifyId === $json.spotifyId).json")
             # Keep HTTP 409's explicit retryable body available to the recorder.
             options = node['parameters'].setdefault('options', {})
             response = options.setdefault('response', {}).setdefault('response', {})

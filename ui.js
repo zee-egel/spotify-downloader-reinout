@@ -392,7 +392,7 @@ function route() {
   }
   document.title =
     { files: "Library", transfers: "Downloads", start: "Import" }[view] +
-    " · Playlist desk";
+    " · The Disc Situation";
 }
 runList.addEventListener("click", (e) => {
   const button = e.target.closest(".more-tracks");
