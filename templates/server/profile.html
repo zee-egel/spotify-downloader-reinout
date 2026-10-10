@@ -1,0 +1,83 @@
+<section class="profile-page">
+  <div class="page-heading">
+    <h1>Your connections</h1>
+    <p>Manage Spotify access and download notifications.</p>
+  </div>
+  <div class="account-strip">
+    <span class="account-avatar" aria-hidden="true">${avatar_initial}</span>
+    <div>
+      <strong>${username}</strong>
+      <p class="muted">
+        Your imports, files, and connections belong to this profile. Your guilty
+        pleasures stay yours.
+      </p>
+    </div>
+  </div>
+  <section class="settings-section">
+    <div>
+      <h2>Spotify</h2>
+      <p>
+        Connect your account to import playlists, including your private
+        collections.
+      </p>
+    </div>
+    <div class="settings-content">
+      <p class="connection-state">
+        <span class="badge ${spotify_kind}">${spotify_status}</span>
+        ${spotify_name}
+      </p>
+      <div class="settings-actions">
+        <form method="post" action="/spotify/connect">
+          <button class="primary">${spotify_button}</button>
+        </form>
+        ${spotify_disconnect}
+      </div>
+    </div>
+  </section>
+  <section class="settings-section">
+    <div>
+      <h2>Telegram</h2>
+      <p>
+        Get playlist updates in your own chat. Like a roadie, but less likely to
+        lose your number.
+      </p>
+      <p class="muted">
+        Create a bot with @BotFather, then start a chat with your bot before
+        connecting it here.
+      </p>
+    </div>
+    <div class="settings-content">
+      <p class="connection-state">
+        <span class="badge ${telegram_kind}">${telegram_status}</span>
+        ${telegram_name}
+      </p>
+      <form method="post" action="/profile/telegram" class="settings-form">
+        <label for="bot-token">Bot token</label>
+        <input
+          id="bot-token"
+          type="password"
+          name="token"
+          autocomplete="new-password"
+          spellcheck="false"
+          aria-describedby="token-hint"
+          placeholder="${token_placeholder}"
+        />
+        <p class="hint" id="token-hint">${token_hint}</p>
+        <label for="chat-id">Chat ID</label>
+        <input
+          id="chat-id"
+          name="chat"
+          autocomplete="off"
+          spellcheck="false"
+          inputmode="numeric"
+          value="${chat_id}"
+          required
+        />
+        <button class="primary">Save bot</button>
+      </form>
+      ${telegram_actions}
+    </div>
+  </section>
+  <p id="settings-feedback" role="status"></p>
+</section>
+${profile_script}

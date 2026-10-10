@@ -1,10 +1,13 @@
-const sourceIcon = (source) => {
-  if (source === "youtube")
-    return '<span class="track-source" title="Downloaded from YouTube"><svg role="img" aria-label="Downloaded from YouTube" viewBox="0 0 24 24"><path fill="#ff0033" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8Z"/><path fill="white" d="m9.6 15.6 6.3-3.6-6.3-3.6Z"/></svg></span>';
-  if (source === "soulseek")
-    return '<span class="track-source" title="Downloaded from Soulseek"><img width="16" height="16" alt="Downloaded from Soulseek" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMA/wD/AP83WBt9AAAACXBIWXMAAA7EAAAOxAGVKw4bAAADG0lEQVR42gEQA+/8AP///////////////////////yEg/////////////////////////////////////wH///8AAAAAAAAAAAAAAAAiJQAIBAAABAAAAADW0wAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAA3tsACAwAEAwAEAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAABENAAkJAMbHAENCAAAAAAAAAAAAAAAAAAAAAAAAAAJLSgAAAAAAAAAAAAAAAAAAAAAICAAIDABLTgAICABDRgAAAAAAAAAAAAAAAAAyNQACEBAAW1oAAAAAAAAAAAAAAAAAtbYACAgACAgAtbYAvboAAAAAAAAAAAAAMjUAAPwAAf///2xqAAAAAPj8AAAAAJyaAAAAAFteAAAAAKWiAFNSAPj4APj4APf3APj4AM7PAAH///98egAAAAD4/AAA/AD4/AAAAAAA/AAAAADv9AD4+AD4+AD49AD39wDGxwAAAAACAAAAhIYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAxscAAAAAAAAAAgAAAAAAAISGABENAAgIAAgIAAgEAAAEAAAEAAkEAAAAAAD8AL2+AAAAAAAAAAAAAAH///8AAAAAAAAAAAAAAAAAAAB0dgD4+AAAAAD49ACcngAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAACAQAAAQAAAAAlJ4AAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAkJAAAEAIyOAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAACVlwAABACMigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB////AAAAAAAAAAAArqsA7/AAY2UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAFJVAAkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEtuhEWOEKNEAAAAAElFTkSuQmCC"></span>';
-  return '<span class="track-source" aria-hidden="true"></span>';
-};
+const uiTemplates = JSON.parse(document.getElementById("ui-templates").textContent);
+function renderHTML(name, values = {}) {
+  return uiTemplates[name].replace(/\$\{(\w+)\}/g, (_, key) => {
+    if (!(key in values)) throw Error(`Missing ${key} in ${name}`);
+    return String(values[key]);
+  });
+}
+const sourceIcon = (source) => renderHTML(
+  source === "youtube" ? "source-youtube" : source === "soulseek" ? "source-soulseek" : "source-empty",
+);
 const esc = (s) =>
   String(s ?? "").replace(
     /[&<>"']/g,
@@ -48,28 +51,14 @@ const labels = {
   "trying another source": "Trying another source",
 };
 const label = (s) => labels[s] || "Needs attention";
-const badge = (s) =>
-  '<span class="badge ' +
-  (s === "completed"
-    ? "success"
-    : s === "downloading" || s.startsWith("youtube ")
-      ? "active"
-      : /fail|error|timeout|no.?match|review|unavailable/.test(s)
-        ? "failed"
-        : "") +
-  '">' +
-  esc(label(s)) +
-  "</span>";
-const progress = (value, name, complete = false) =>
-  '<div class="progress ' +
-  (complete ? "complete" : "") +
-  '" role="progressbar" aria-label="' +
-  esc(name) +
-  '" aria-valuenow="' +
-  Math.round(value) +
-  '" aria-valuemin="0" aria-valuemax="100"><span style="width:' +
-  Math.max(0, Math.min(100, value)) +
-  '%"></span></div>';
+const badge = (s) => renderHTML("badge", {
+  kind: s === "completed" ? "success" : s === "downloading" || s.startsWith("youtube ") ? "active" : /fail|error|timeout|no.?match|review|unavailable/.test(s) ? "failed" : "",
+  label: esc(label(s)),
+});
+const progress = (value, name, complete = false) => renderHTML("progress", {
+  kind: complete ? "complete" : "", name: esc(name),
+  value: Math.round(value), width: Math.max(0, Math.min(100, value)),
+});
 const trackLimits = new Map();
 let receivedSnapshot = false;
 let snapshot = JSON.parse(document.getElementById("initial-runs").textContent),
@@ -151,70 +140,28 @@ function transferMarkup(rows) {
       groups.set(key, { name: run?.name || "Other downloads", rows: [] });
     groups.get(key).rows.push(t);
   }
-  return [...groups]
-    .map(
-      ([key, g]) =>
-        '<details class="transfer-group" data-key="' +
-        esc(key) +
-        '" open><summary><span>' +
-        esc(g.name) +
-        '</span><span class="count">' +
-        g.rows.length +
-        (g.rows.length === 1 ? " file" : " files") + "</span></summary>" +
-        g.rows
-          .map((t) => {
-            const detailKey =
-              key + ":" + (t.id || t.batchId + ":" + t.username + ":" + t.name);
-            return (
-              '<article class="row transfer ' +
-              (t.kind === "completed" ? "completed" : "") +
-              '"><div class="transfer-top"><div><strong title="' +
-              esc(t.name) +
-              '">' +
-              esc(t.name) +
-              '</strong><div class="muted">' +
-              esc(t.username || "Source unavailable") +
-              "</div></div>" +
-              badge(t.kind) +
-              "</div>" +
-              (t.kind === "downloading"
-                ? (t.size ? progress(t.percent, t.name) : "") +
-                  '<div class="transfer-bottom"><span>' +
-                  bytes(t.done) +
-                  (t.size ? " / " + bytes(t.size) : "") +
-                  (t.speed ? " · " + bytes(t.speed) + "/s" : "") +
-                  "</span><span>" +
-                  (t.size
-                    ? Math.round(t.percent) + "%"
-                    : "File size not reported") +
-                  "</span></div>"
-                : "") +
-              '<details class="track-details" data-key="' +
-              esc(detailKey) +
-              '"><summary>File details</summary><dl><dt>Source</dt><dd>' +
-              esc(t.username || "Unavailable") +
-              "</dd><dt>Folder</dt><dd>" +
-              esc(t.folder) +
-              "</dd>" +
-              (t.size
-                ? "<dt>File size</dt><dd>" + bytes(t.size) + "</dd>"
-                : "") +
-              "<dt>Status</dt><dd>" +
-              esc(t.state) +
-              "</dd>" +
-              (t.error ? "<dt>Problem</dt><dd>" + esc(t.error) + "</dd>" : "") +
-              "</dl></details>" +
-              (t.kind === "failed"
-                ? '<div class="error">The download stopped. Check the source in file details.</div>'
-                : "") +
-              "</article>"
-            );
-          })
-          .join("") +
-        "</details>",
-    )
-    .join("");
+  return [...groups].map(([key, g]) => renderHTML("transfer-group", {
+    key: esc(key), name: esc(g.name), count: g.rows.length,
+    unit: g.rows.length === 1 ? "file" : "files",
+    rows: g.rows.map(t => renderHTML("transfer", {
+      kind: t.kind === "completed" ? "completed" : "",
+      name: esc(t.name), source: esc(t.username || "Source unavailable"),
+      badge: badge(t.kind),
+      progress: t.kind === "downloading" ? renderHTML("transfer-progress", {
+        bar: t.size ? progress(t.percent, t.name) : "",
+        bytes: bytes(t.done) + (t.size ? " / " + bytes(t.size) : "") + (t.speed ? " · " + bytes(t.speed) + "/s" : ""),
+        percent: t.size ? Math.round(t.percent) + "%" : "File size not reported",
+      }) : "",
+      key: esc(key + ":" + (t.id || t.batchId + ":" + t.username + ":" + t.name)),
+      sourceDetail: esc(t.username || "Unavailable"), folder: esc(t.folder),
+      size: t.size ? renderHTML("definition", { label: "File size", value: bytes(t.size) }) : "",
+      state: esc(t.state),
+      error: t.error ? renderHTML("definition", { label: "Problem", value: esc(t.error) }) : "",
+      failure: t.kind === "failed" ? renderHTML("transfer-failure") : "",
+    })).join(""),
+  })).join("");
 }
+
 function renderTransfers() {
   const query = controls.search.value.trim().toLowerCase(),
     status = controls.status.value,
@@ -284,15 +231,10 @@ function renderTransfers() {
     transferList,
     rows.length
       ? transferMarkup(rows.slice(0, transferLimit))
-      : '<div class="empty">' +
-          (query || status
-            ? "No downloads match your filters."
-            : snapshot.error
-              ? "Downloads will appear when the connection is restored."
-              : !receivedSnapshot
-                ? "Loading downloads…"
-                : 'No downloads yet. <a class="link" href="#start">Import a playlist</a>') +
-          "</div>",
+      : renderHTML("empty", { content: query || status
+          ? "No downloads match your filters. Even the deep cuts came up empty."
+          : snapshot.error ? "Downloads will appear when the connection is restored."
+          : !receivedSnapshot ? "Loading downloads…" : renderHTML("empty-transfers") }),
   );
   const more = document.getElementById("more-transfers");
   more.hidden = rows.length <= transferLimit;
@@ -359,46 +301,19 @@ function renderRuns() {
                     minute: "2-digit",
                   });
             const limit = trackLimits.get(key) || 100;
-            const trackRows = r.tracks
-              .slice(0, limit)
-              .map(
-                (t, j) =>
-                  '<div class="track-row" data-key="' +
-                  esc(key + ":row:" + (t.spotifyId || j)) +
-                  '"><span class="track-number">' +
-                  (j + 1) +
-                  "</span>" +
-                  sourceIcon(t.downloadSource) +
-                  '<div class="track-info"><span class="track-title" title="' +
-                  esc(t.title) +
-                  '">' +
-                  esc(t.title || "Untitled track") +
-                  '</span><div class="muted">' +
-                  esc(t.artist) +
-                  "</div>" +
-                  (t.reason
-                    ? '<div class="muted">' + esc(t.reason) + "</div>"
-                    : "") +
-                  (t.source
-                    ? '<details class="track-details" data-key="' +
-                      esc(key + ":track:" + j) +
-                      '"><summary>Source details</summary><div>' +
-                      esc(t.source) +
-                      (t.fallback ? " · Alternative source" : "") +
-                      "</div></details>"
-                    : "") +
-                  "</div>" +
-                  badge(t.status) +
-                  ((t.status === "downloading" ||
-                    t.status === "youtube downloading") &&
-                  t.percent != null
-                    ? '<span class="count">' +
-                      Math.round(t.percent) +
-                      "%</span>"
-                    : "") +
-                  "</div>",
-              )
-              .join("");
+            const trackRows = r.tracks.slice(0, limit).map((t, j) => renderHTML("track", {
+              key: esc(key + ":row:" + (t.spotifyId || j)), number: j + 1,
+              sourceIcon: sourceIcon(t.downloadSource), title: esc(t.title),
+              displayTitle: esc(t.title || "Untitled track"), artist: esc(t.artist),
+              reason: t.reason ? renderHTML("track-reason", { reason: esc(t.reason) }) : "",
+              source: t.source ? renderHTML("track-source", {
+                key: esc(key + ":track:" + j), source: esc(t.source),
+                fallback: t.fallback ? " · Alternative source" : "",
+              }) : "",
+              badge: badge(t.status),
+              percent: (t.status === "downloading" || t.status === "youtube downloading") && t.percent != null
+                ? renderHTML("track-percent", { percent: Math.round(t.percent) }) : "",
+            })).join("");
             const active =
               r.tracks.find((t) => t.status.startsWith("youtube ")) ||
               r.tracks.find((t) =>
@@ -439,74 +354,28 @@ function renderRuns() {
                   : ["submitted", "submitting", "resolving"].includes(r.phase)
                     ? "Track details appear as they arrive. Songs are searched one at a time."
                     : r.tracks.some((t) => t.status.includes("queued"))
-                      ? "The source has not started sending these files. Available songs are already in your library."
+                      ? "The source has not started sending these files. Available songs are already in your library. Peer pressure has its limits."
                       : "Progress appears when the download service reports a change.";
-            return (
-              '<article class="run" data-key="run:' +
-              esc(key) +
-              '"><div class="run-header"><span class="artwork" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="16" stroke="currentColor" stroke-width="1.5"/><circle cx="20" cy="20" r="10" stroke="currentColor"/><circle cx="20" cy="20" r="4" fill="currentColor"/></svg></span><div class="run-info"><h3 class="run-title">' +
-              esc(r.name || "Spotify playlist") +
-              '</h3><div class="muted">' +
-              esc(when) +
-              (total != null ? " · " + total + " tracks" : "") +
-              '</div></div><span class="badge ' +
-              (finished ? (complete ? "success" : "failed") : "active") +
-              '">' +
-              status +
-              "</span></div>" +
-              '<div class="run-stats"><div><strong>' +
-              handled +
-              "</strong><span>tracks handled</span></div><div><strong>" +
-              complete +
-              "</strong><span>songs downloaded</span></div><div><strong>" +
-              unavailable +
-              "</strong><span>unavailable</span></div></div>" +
-              (total
-                ? '<div class="run-progress"><div class="progress-caption"><span>Track outcomes</span><span>' +
-                  handled +
-                  " / " +
-                  total +
-                  "</span></div>" +
-                  progress(
-                    (handled / total) * 100,
-                    "Tracks handled",
-                    finished,
-                  ) +
-                  "</div>"
-                : "") +
-              '<div class="run-activity"><strong>' +
-              esc(activity) +
-              "</strong><span>" +
-              esc(description) +
-              "</span></div>" +
-              '<div class="run-details">' +
-              (counts.length && !finished
-                ? '<p class="run-counts">' + esc(counts.join(" · ")) + "</p>"
-                : "") +
-              '<div class="run-actions"><a class="link" href="#files">' +
-              (complete ? "Get downloaded music" : "Open library") +
-              '</a><a class="link" href="#transfers">Monitor transfers</a></div><details data-key="' +
-              esc(key) +
-              '"' +
-              (!finished && i === 0 ? " open" : "") +
-              "><summary>View " +
-              (total != null ? total + " " : "") +
-              'tracks</summary><div class="track-list">' +
-              (trackRows ||
-                '<p class="muted">Track details have not arrived yet.</p>') +
-              "</div>" +
-              (r.tracks.length > limit
-                ? '<button class="more-tracks" data-run="' +
-                  esc(key) +
-                  '" type="button">Show more tracks</button>'
-                : "") +
-              '<a class="link" href="https://open.spotify.com/playlist/' +
-              encodeURIComponent(r.id) +
-              '" target="_blank" rel="noopener noreferrer">Open in Spotify (new tab)</a></details></div></article>'
-            );
+            return renderHTML("run", {
+              key: esc(key), name: esc(r.name || "Spotify playlist"), when: esc(when),
+              totalLabel: total != null ? " · " + total + " tracks" : "",
+              kind: finished ? (complete ? "success" : "failed") : "active",
+              status, handled, complete, unavailable,
+              progress: total ? renderHTML("run-progress", {
+                handled, total, bar: progress((handled / total) * 100, "Tracks handled", finished),
+              }) : "",
+              activity: esc(activity), description: esc(description),
+              counts: counts.length && !finished ? renderHTML("run-counts", { counts: esc(counts.join(" · ")) }) : "",
+              libraryLabel: complete ? "Get downloaded music" : "Open library",
+              open: !finished && i === 0 ? " open" : "",
+              trackCount: total != null ? total + " " : "",
+              tracks: trackRows || renderHTML("empty-tracks"),
+              more: r.tracks.length > limit ? renderHTML("more-tracks", { key: esc(key) }) : "",
+              playlistId: encodeURIComponent(r.id),
+            });
           })
           .join("")
-      : '<div class="empty"><strong>Your collection starts here.</strong><p>No playlists imported yet. Paste a Spotify playlist above to find your songs and follow their downloads.</p></div>',
+      : renderHTML("empty-imports"),
   );
   document.getElementById("clear-history").hidden = !snapshot.runs.length;
 }
@@ -691,7 +560,7 @@ form.addEventListener("submit", async (e) => {
       );
     }
     feedback.textContent =
-      "Playlist submitted. Track information will appear in your imports below.";
+      "Playlist submitted. The crate digging has begun. Follow the tracks in your imports below.";
     input.value = "";
   } catch (error) {
     feedback.className = "error";
@@ -714,11 +583,9 @@ function connect() {
     try {
       snapshot = JSON.parse(e.data);
       receivedSnapshot = true;
-      document.getElementById("live-status").innerHTML =
-        '<span class="live-dot ' +
-        (snapshot.error ? "offline" : "") +
-        '"></span>' +
-        (snapshot.error ? "Source offline" : "Connected");
+      document.getElementById("live-status").innerHTML = renderHTML("connection", {
+        kind: snapshot.error ? "offline" : "", label: snapshot.error ? "Source offline" : "Connected",
+      });
       renderTransfers();
       renderRuns();
       renderLibrary();
@@ -729,7 +596,7 @@ function connect() {
   };
   stream.onerror = () => {
     document.getElementById("live-status").innerHTML =
-      '<span class="live-dot offline"></span>Reconnecting…';
+      renderHTML("connection", { kind: "offline", label: "Reconnecting…" });
   };
 }
 document.getElementById("reconnect").addEventListener("click", connect);

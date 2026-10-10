@@ -1,0 +1,23 @@
+<div class="row transfer">
+  <div class="transfer-top">
+    <div>
+      <strong>${label}</strong>
+      <div class="muted">${username} · ${folder}</div>
+    </div>
+    <span class="badge">${status}</span>
+  </div>
+  <div
+    class="progress"
+    role="progressbar"
+    aria-label="${label}"
+    aria-valuenow="${percent}"
+    aria-valuemin="0"
+    aria-valuemax="100"
+  >
+    <span style="width:${width}%"></span>
+  </div>
+  <div class="transfer-bottom">
+    <span>${detail}</span>
+    <strong>${percent}%</strong>
+  </div>
+</div>

@@ -1,0 +1,9 @@
+<form
+  class="inline-form"
+  method="post"
+  action="/delete"
+  onsubmit="return confirm('Delete this item permanently?');"
+>
+  <input type="hidden" name="path" value="${path}" />
+  <button class="danger" type="submit">Delete</button>
+</form>

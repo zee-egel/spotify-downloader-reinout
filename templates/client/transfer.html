@@ -1,0 +1,24 @@
+<article class="row transfer ${kind}">
+  <div class="transfer-top">
+    <div>
+      <strong title="${name}">${name}</strong>
+      <div class="muted">${source}</div>
+    </div>
+    ${badge}
+  </div>
+  ${progress}
+  <details class="track-details" data-key="${key}">
+    <summary>File details</summary>
+    <dl>
+      <dt>Source</dt>
+      <dd>${sourceDetail}</dd>
+      <dt>Folder</dt>
+      <dd>${folder}</dd>
+      ${size}
+      <dt>Status</dt>
+      <dd>${state}</dd>
+      ${error}
+    </dl>
+  </details>
+  ${failure}
+</article>

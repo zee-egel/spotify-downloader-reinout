@@ -1,0 +1,81 @@
+<div data-view="start">
+  <section class="import" id="start">
+    <div class="import-intro">
+      <h1>
+        Totally not pirating...
+        <br />
+      </h1>
+      <p>(Arr...)</p>
+    </div>
+    <div class="import-desk">
+      <h2>Import a playlist</h2>
+      <form method="post" action="/submit" id="import-form">
+        <label for="playlist-url">Spotify playlist link</label>
+        <div class="field">
+          <input
+            id="playlist-url"
+            name="url"
+            aria-describedby="import-hint import-feedback"
+            placeholder="https://open.spotify.com/playlist/…"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <button class="primary" type="submit">Import playlist</button>
+        </div>
+      </form>
+      <div class="hint" id="import-hint">
+        Paste a playlist URL or Spotify URI.
+        <kbd>⌘ / Ctrl K</kbd>
+      </div>
+      <div id="import-feedback" role="status"></div>
+    </div>
+  </section>
+  <ol class="process-guide" aria-label="How playlist downloads work">
+    <li>
+      <span>1</span>
+      <div>
+        <strong>Find your tracks</strong>
+        <p>Search Soulseek for each song. Crate digging, minus the dust.</p>
+      </div>
+    </li>
+    <li>
+      <span>2</span>
+      <div>
+        <strong>Recover missing songs</strong>
+        <p>Try YouTube and check the audio. A B-side to the original plan.</p>
+      </div>
+    </li>
+    <li>
+      <span>3</span>
+      <div>
+        <strong>Build your library</strong>
+        <p>Get available files as they arrive. Shelf space sold separately.</p>
+      </div>
+    </li>
+  </ol>
+  <section id="activity">
+    <div class="sectionhead">
+      <div>
+        <h2>Your imports</h2>
+        <p class="muted">
+          Follow each playlist from first search to final file.
+        </p>
+      </div>
+      <form
+        id="clear-history"
+        class="inline-form"
+        method="post"
+        action="/clear-history"
+        onsubmit="
+          return confirm(
+            'Clear import history? Downloaded files will be kept.',
+          );
+        "
+      >
+        <button class="danger" type="submit">Clear history</button>
+      </form>
+    </div>
+    <div class="list" id="run-list"></div>
+  </section>
+</div>

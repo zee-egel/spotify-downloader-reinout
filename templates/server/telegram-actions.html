@@ -1,0 +1,12 @@
+<div class="settings-actions">
+  <form method="post" action="/profile/telegram-test">
+    <button>Send test message</button>
+  </form>
+  <form
+    method="post"
+    action="/profile/telegram-disconnect"
+    onsubmit="return confirm('Disconnect Telegram notifications?');"
+  >
+    <button class="danger">Disconnect bot</button>
+  </form>
+</div>

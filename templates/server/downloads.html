@@ -1,0 +1,50 @@
+<section data-view="transfers" id="transfers">
+  <div class="page-heading">
+    <h1>Downloads</h1>
+    <p>
+      Live file transfers from Soulseek. Playlist recovery appears in
+      <a class="link" href="#start">your imports</a>
+      .
+    </p>
+  </div>
+  <p class="queue-summary" id="queue-summary"></p>
+  <div class="notice" id="queue-notice" hidden>
+    <span id="queue-error"></span>
+    <button type="button" id="reconnect">Reconnect</button>
+  </div>
+  <div class="controls">
+    <input
+      id="transfer-search"
+      type="search"
+      name="search"
+      autocomplete="off"
+      placeholder="Search downloads…"
+      aria-label="Search downloads"
+    />
+    <select id="transfer-status" aria-label="Filter download status">
+      <option value="">All statuses</option>
+      <option value="downloading">Downloading</option>
+      <option value="queued">Queued</option>
+      <option value="failed">Failed</option>
+      <option value="completed">Complete</option>
+      <option value="unknown">Awaiting status</option>
+    </select>
+    <select id="transfer-sort" aria-label="Sort downloads">
+      <option value="status">Active first</option>
+      <option value="newest">Newest first</option>
+      <option value="progress">Progress</option>
+      <option value="name">Name</option>
+      <option value="speed">Speed</option>
+    </select>
+    <button
+      id="transfer-reverse"
+      type="button"
+      data-reverse="false"
+      aria-pressed="false"
+    >
+      Reverse order
+    </button>
+  </div>
+  <div class="list" id="transfer-list"></div>
+  <button id="more-transfers" type="button" hidden>Show more</button>
+</section>

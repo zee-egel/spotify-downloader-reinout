@@ -1,0 +1,48 @@
+<article class="run" data-key="run:${key}">
+  <div class="run-header">
+    <span class="artwork" aria-hidden="true">
+      <svg viewBox="0 0 40 40" fill="none">
+        <circle cx="20" cy="20" r="16" stroke="currentColor" stroke-width="1.5" />
+        <circle cx="20" cy="20" r="10" stroke="currentColor" />
+        <circle cx="20" cy="20" r="4" fill="currentColor" />
+      </svg>
+    </span>
+    <div class="run-info">
+      <h3 class="run-title">${name}</h3>
+      <div class="muted">${when}${totalLabel}</div>
+    </div>
+    <span class="badge ${kind}">${status}</span>
+  </div>
+  <div class="run-stats">
+    <div>
+      <strong>${handled}</strong>
+      <span>tracks handled</span>
+    </div>
+    <div>
+      <strong>${complete}</strong>
+      <span>songs downloaded</span>
+    </div>
+    <div>
+      <strong>${unavailable}</strong>
+      <span>unavailable</span>
+    </div>
+  </div>
+  ${progress}
+  <div class="run-activity">
+    <strong>${activity}</strong>
+    <span>${description}</span>
+  </div>
+  <div class="run-details">
+    ${counts}
+    <div class="run-actions">
+      <a class="link" href="#files">${libraryLabel}</a>
+      <a class="link" href="#transfers">Monitor transfers</a>
+    </div>
+    <details data-key="${key}"${open}>
+      <summary>View ${trackCount}tracks</summary>
+      <div class="track-list">${tracks}</div>
+      ${more}
+      <a class="link" href="https://open.spotify.com/playlist/${playlistId}" target="_blank" rel="noopener noreferrer">Open in Spotify (new tab)</a>
+    </details>
+  </div>
+</article>

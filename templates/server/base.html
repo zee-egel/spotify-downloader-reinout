@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f3f5f7" />
+    <title>${title}</title>
+    <style>
+      ${css}
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <div class="shell">
+      <header class="top">
+        <a class="brand" href="/" translate="no">
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" fill="none">
+              <circle cx="20" cy="20" r="18" fill="currentColor" />
+              <circle
+                cx="20"
+                cy="20"
+                r="11"
+                stroke="white"
+                stroke-width="1.5"
+              />
+              <circle cx="20" cy="20" r="5" fill="white" />
+              <circle cx="20" cy="20" r="1.5" fill="currentColor" />
+            </svg>
+          </span>
+          <span>
+            Playlist
+            <br />
+            desk
+            <span class="brand-caption">Music, collected.</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Main navigation">
+          <a href="/#start">
+            <span aria-hidden="true">＋</span>
+            Import
+          </a>
+          <a href="/#transfers">
+            <span aria-hidden="true">↓</span>
+            Downloads
+          </a>
+          <a href="/#files">
+            <span aria-hidden="true">≡</span>
+            Library
+          </a>
+          <a href="/profile" ${profile}>
+            <span aria-hidden="true">⚙</span>
+            Profile
+          </a>
+        </nav>
+        <div class="sidebar-foot">
+          <a href="/profile">Manage connections</a>
+        </div>
+      </header>
+      <div class="workspace">
+        <div class="workspace-bar">
+          <span>Spotify playlist downloader</span>
+          <span class="connection" id="live-status" role="status"
+            >${connection_status}</span
+          >
+        </div>
+        <script type="application/json" id="ui-templates">
+          ${ui_templates}
+        </script>
+        <main id="main" tabindex="-1">${body}</main>
+        <footer class="workspace-footer">Playlist desk</footer>
+      </div>
+    </div>
+  </body>
+</html>

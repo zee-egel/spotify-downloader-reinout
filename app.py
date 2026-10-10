@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import profiles
+from views import render_html, client_templates_json
 
 ROOT = Path(os.environ.get('DOWNLOADS_ROOT', './downloads')).resolve()
 STATE = Path(os.environ.get('STATE_FILE', './state.json'))
@@ -236,13 +237,31 @@ def library_view(folder='', sort='name', direction='asc', root=None):
         for item in items:
             rel = str(item.relative_to(root))
             quoted = urllib.parse.quote(rel)
-            delete = '<form class="inline-form" method="post" action="/delete" onsubmit="return confirm(\'Delete this item permanently?\')"><input type="hidden" name="path" value="' + html.escape(rel, quote=True) + '"><button class="danger" type="submit">Delete</button></form>'
+            delete = render_html('delete-form', path=html.escape(rel, quote=True))
             if item.is_dir():
                 count = sum(1 for child in item.iterdir() if not child.is_symlink() and child.resolve().is_relative_to(root))
-                rows.append(f'<div class="row library-row folder" data-path="{html.escape(rel, quote=True)}"><div><a class="filename" href="/?folder={quoted}{sort_query}#files"><span class="file-icon" aria-hidden="true">≡</span><strong>{safe_name(item)}</strong></a><div class="muted">{count} item{"s" if count != 1 else ""} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/?folder={quoted}{sort_query}#files">Open</a><a class="link" href="/zip?path={quoted}">Download ZIP</a>{delete}</div></div>')
+                rows.append(render_html(
+                    'library-folder',
+                    rel=html.escape(rel, quote=True),
+                    folder_path=quoted,
+                    sort_query=sort_query,
+                    name=safe_name(item),
+                    count=count,
+                    plural="s" if count != 1 else "",
+                    modified=datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d"),
+                    delete=delete,
+                ))
             elif item.is_file():
-                rows.append(f'<div class="row library-row" data-path="{html.escape(rel, quote=True)}"><div><div class="filename"><span class="file-icon" aria-hidden="true">♪</span><strong>{safe_name(item)}</strong></div><div class="muted">{size_label(item.stat().st_size)} · Modified {datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d")}</div></div><div class="right"><a class="link" href="/file?path={quoted}">Download</a>{delete}</div></div>')
-        return {'html': ''.join(rows) or '<div class="empty">No music here yet.<p>Files appear here as downloads finish. <a class="link" href="/#start">Import a playlist</a> to get started.</p></div>', 'error': None}
+                rows.append(render_html(
+                    'library-file',
+                    rel=html.escape(rel, quote=True),
+                    name=safe_name(item),
+                    size=size_label(item.stat().st_size),
+                    modified=datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d"),
+                    quoted=quoted,
+                    delete=delete,
+                ))
+        return {'html': ''.join(rows) or render_html('library-empty'), 'error': None}
     except (ValueError, OSError):
         return {'html': None, 'error': 'This folder is unavailable. It may have moved or been removed.'}
 
@@ -253,7 +272,15 @@ LIVE_JS = Path(__file__).with_name('ui.js').read_text()
 
 def page(body, title='Playlist desk'):
     profile = 'aria-current="page"' if 'class="profile-page"' in body else ''
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="theme-color" content="#f3f5f7"><title>{html.escape(title)}</title><style>{CSS}</style></head><body><a class="skip" href="#main">Skip to content</a><div class="shell"><header class="top"><a class="brand" href="/" translate="no"><span class="mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18" fill="currentColor"/><circle cx="20" cy="20" r="11" stroke="white" stroke-width="1.5"/><circle cx="20" cy="20" r="5" fill="white"/><circle cx="20" cy="20" r="1.5" fill="currentColor"/></svg></span><span>Playlist<br> desk<span class="brand-caption">Music, collected.</span></span></a><nav class="nav" aria-label="Main navigation"><a href="/#start"><span aria-hidden="true">＋</span>Import</a><a href="/#transfers"><span aria-hidden="true">↓</span>Downloads</a><a href="/#files"><span aria-hidden="true">≡</span>Library</a><a href="/profile" {profile}><span aria-hidden="true">⚙</span>Profile</a></nav><div class="sidebar-foot"><p>Your playlist.<br>Your music library.</p><a href="/profile">Manage connections</a></div></header><div class="workspace"><div class="workspace-bar"><span>Spotify playlist downloader</span><span class="connection" id="live-status" role="status">{'Personal settings' if profile else 'Connecting…'}</span></div><main id="main" tabindex="-1">{body}</main><footer class="workspace-footer">Playlist desk <span>Soulseek first. YouTube when needed.</span></footer></div></div></body></html>'''.encode()
+    return render_html(
+        'base',
+        title=html.escape(title),
+        css=CSS,
+        profile=profile,
+        connection_status='Personal settings' if profile else 'Connecting…',
+        body=body,
+        ui_templates=client_templates_json(),
+    ).encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -499,17 +526,17 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
         except urllib.error.HTTPError as error:
             if self.path.startswith(('/profile/', '/spotify/')) or (self.path == '/submit' and os.environ.get('SPOTIFY_CLIENT_ID') and not submission_id):
-                self.send(page('<p>The connected service rejected this request. Check your connection in Profile and try again.</p><a href="/profile">Profile</a>'), status=502)
+                self.send(page(render_html('service-error')), status=502)
                 return
             self.log_error('n8n webhook returned HTTP %d', error.code)
             message = 'n8n rejected the webhook credentials (403); check N8N_WEBHOOK_TOKEN' if error.code == 403 else f'n8n webhook returned HTTP {error.code}; check N8N_WEBHOOK_URL'
-            self.send(page('<div class="error-page"><div class="error">The download service could not accept this playlist. Check the connection and try again.</div><details class="track-details"><summary>Technical details</summary>' + html.escape(message) + '</details><a href="/">Back to import</a></div>'), status=502)
+            self.send(page(render_html('submit-error', details=html.escape(message))), status=502)
         except (ValueError, urllib.error.URLError, TimeoutError) as error:
             message = 'Connection lost. Check recent imports before submitting again.' if isinstance(error, (urllib.error.URLError, TimeoutError)) else str(error)
-            self.send(page('<div class="error">' + html.escape(message) + '</div><p><a href="/">Return to dashboard</a></p>'), status=400)
+            self.send(page(render_html('error-page', message=html.escape(message))), status=400)
         except OSError as error:
             self.log_error('file operation failed: %s', error)
-            self.send(page('<div class="error">Could not delete this item; check the downloads directory permissions.</div><p><a href="/">Return to dashboard</a></p>'), status=500)
+            self.send(page(render_html('delete-error')), status=500)
 
     def do_GET(self):
         if self.path == '/health':
@@ -529,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
                 profiles.spotify_finish(self.user, urllib.parse.parse_qs(parsed.query))
                 self.redirect('/profile')
             except (ValueError, urllib.error.URLError, TimeoutError, KeyError):
-                self.send(page('<p>Spotify connection failed or expired. Try connecting again from Profile.</p><a href="/profile">Profile</a>'), status=400)
+                self.send(page(render_html('spotify-error')), status=400)
         elif parsed.path in ('/file', '/zip'):
             self.download(parsed)
         elif parsed.path == '/transfers':
@@ -621,7 +648,7 @@ class Handler(BaseHTTPRequestHandler):
                             if file.is_file() and file.resolve().is_relative_to(self.download_root()):
                                 archive.write(file, file.relative_to(target))
         except (ValueError, FileNotFoundError) as error:
-            self.send(page('<div class="error">' + html.escape(str(error)) + '</div>'), status=400)
+            self.send(page(render_html('error', message=html.escape(str(error)))), status=400)
 
     def workflow_status(self):
         expected = os.environ.get('N8N_WEBHOOK_TOKEN', '')
@@ -680,20 +707,29 @@ class Handler(BaseHTTPRequestHandler):
                         save_runs(runs)
             self.send(b'{}', kind='application/json')
         except (ValueError, TypeError) as error:
-            self.send(page('<div class="error">' + html.escape(str(error)) + '</div>'), status=400)
+            self.send(page(render_html('error', message=html.escape(str(error)))), status=400)
 
     def transfer_panel(self):
         transfers, error = self.transfers()
         if error:
-            return '<div class="empty">' + html.escape(error) + '</div>'
+            return render_html('empty', message=html.escape(error))
         rows = []
         for file in transfers[:80]:
             label = html.escape(file['name'])
             detail = f"{size_label(file['done'])} of {size_label(file['size'])}"
             if file['speed']:
                 detail += f" · {size_label(file['speed'])}/s"
-            rows.append(f'<div class="row transfer"><div class="transfer-top"><div><strong>{label}</strong><div class="muted">{html.escape(file["username"])} · {html.escape(file["folder"])}</div></div><span class="badge">{html.escape(file["state"])}</span></div><div class="progress" role="progressbar" aria-label="{label}" aria-valuenow="{file["percent"]:.0f}" aria-valuemin="0" aria-valuemax="100"><span style="width:{file["percent"]:.1f}%"></span></div><div class="transfer-bottom"><span>{html.escape(detail)}</span><strong>{file["percent"]:.0f}%</strong></div></div>')
-        return ''.join(rows) or '<div class="empty">No transfers to show yet.</div>'
+            rows.append(render_html(
+                'transfer-row',
+                label=label,
+                username=html.escape(file["username"]),
+                folder=html.escape(file["folder"]),
+                status=html.escape(file["state"]),
+                percent=format(file["percent"], '.0f'),
+                width=format(file["percent"], '.1f'),
+                detail=html.escape(detail),
+            ))
+        return ''.join(rows) or render_html('transfers-empty')
 
     def events(self):
         self.send_response(200)
@@ -725,11 +761,16 @@ class Handler(BaseHTTPRequestHandler):
         direction = direction if direction in ('asc', 'desc') else 'asc'
         sort_query = '&sort=' + sort + '&dir=' + direction
         library = library_view(folder, sort, direction, self.download_root())
-        crumbs = ['<a href="/?' + sort_query.lstrip('&') + '#files">Library</a>']
+        crumbs = [render_html('library-root-crumb', sort_query=sort_query.lstrip('&'))]
         current = Path()
         for part in Path(folder).parts if folder else []:
             current /= part
-            crumbs.append('<span>›</span><a href="/?folder=' + urllib.parse.quote(str(current)) + sort_query + '#files">' + html.escape(part) + '</a>')
+            crumbs.append(render_html(
+                'library-crumb',
+                folder_path=urllib.parse.quote(str(current)),
+                sort_query=sort_query,
+                part=html.escape(part),
+            ))
         runs = self.runs()[:8]
         missing = {(run['id'], run['submitted']): playlist_name(run['id']) or 'Spotify playlist ' + run['id'] for run in runs if not run.get('name')}
         if missing:
@@ -741,12 +782,24 @@ class Handler(BaseHTTPRequestHandler):
                         run['name'] = missing[key]
                 save_runs(saved)
             runs = self.runs()[:8]
-        body = '''<div data-view="start"><section class="import" id="start"><div class="import-intro"><h1>Totally not pirating...<br>Within reach.</h1><p>(Arr...)</p></div><div class="import-desk"><h2>Import a playlist</h2><form method="post" action="/submit" id="import-form"><label for="playlist-url">Spotify playlist link</label><div class="field"><input id="playlist-url" name="url" aria-describedby="import-hint import-feedback" placeholder="https://open.spotify.com/playlist/…" autocomplete="off" spellcheck="false" required><button class="primary" type="submit">Import playlist</button></div></form><div class="hint" id="import-hint">Paste a playlist URL or Spotify URI. <kbd>⌘ / Ctrl K</kbd></div><div id="import-feedback" role="status"></div></div></section><ol class="process-guide" aria-label="How playlist downloads work"><li><span>1</span><div><strong>Find your tracks</strong><p>Search Soulseek for each song.</p></div></li><li><span>2</span><div><strong>Recover missing songs</strong><p>Try YouTube and check the audio.</p></div></li><li><span>3</span><div><strong>Build your library</strong><p>Get available files as they arrive.</p></div></li></ol><section id="activity"><div class="sectionhead"><div><h2>Your imports</h2><p class="muted">Follow each playlist from first search to final file.</p></div><form id="clear-history" class="inline-form" method="post" action="/clear-history" onsubmit="return confirm('Clear import history? Downloaded files will be kept.')"><button class="danger" type="submit">Clear history</button></form></div><div class="list" id="run-list"></div></section></div>'''
-        body += '''<section data-view="transfers" id="transfers"><div class="page-heading"><h1>Downloads</h1><p>Live file transfers from Soulseek. Playlist recovery appears in <a class="link" href="#start">your imports</a>.</p></div><p class="queue-summary" id="queue-summary"></p><div class="notice" id="queue-notice" hidden><span id="queue-error"></span><button type="button" id="reconnect">Reconnect</button></div><div class="controls"><input id="transfer-search" type="search" name="search" autocomplete="off" placeholder="Search downloads…" aria-label="Search downloads"><select id="transfer-status" aria-label="Filter download status"><option value="">All statuses</option><option value="downloading">Downloading</option><option value="queued">Queued</option><option value="failed">Failed</option><option value="completed">Complete</option><option value="unknown">Awaiting status</option></select><select id="transfer-sort" aria-label="Sort downloads"><option value="status">Active first</option><option value="newest">Newest first</option><option value="progress">Progress</option><option value="name">Name</option><option value="speed">Speed</option></select><button id="transfer-reverse" type="button" data-reverse="false" aria-pressed="false">Reverse order</button></div><div class="list" id="transfer-list"></div><button id="more-transfers" type="button" hidden>Show more</button></section>'''
-        body += '<section data-view="files" id="files"><div class="sectionhead"><div><h1>Library</h1><p class="muted">Ready to listen. Download individual files or a whole folder.</p><div class="crumbs">' + ''.join(crumbs) + '</div></div><a class="link" href="' + html.escape(self.path.split('#')[0], quote=True) + '#files">Refresh</a></div><form class="controls" method="get" action="/#files"><input id="library-search" type="search" autocomplete="off" placeholder="Search this folder…" aria-label="Search this folder"><input type="hidden" name="folder" value="' + html.escape(folder, quote=True) + '"><select id="file-sort" name="sort" aria-label="Sort files"><option value="name"' + (' selected' if sort == 'name' else '') + '>Name</option><option value="type"' + (' selected' if sort == 'type' else '') + '>Type</option><option value="size"' + (' selected' if sort == 'size' else '') + '>Size</option><option value="modified"' + (' selected' if sort == 'modified' else '') + '>Modified</option></select><select name="dir" aria-label="File sort direction"><option value="asc"' + (' selected' if direction == 'asc' else '') + '>Ascending</option><option value="desc"' + (' selected' if direction == 'desc' else '') + '>Descending</option></select><button type="submit">Sort</button></form><div class="list" id="library-list">' + (library['html'] or '') + '</div><details class="section library-activity" id="library-activity"><summary>Transfers in this session</summary><div id="library-transfers" class="list"></div><button type="button" id="more-library-transfers" hidden>Show more</button></details><p id="library-error" class="error" role="status"></p><p id="library-no-match" class="empty" hidden>No files match your search.</p></section>'
+        body = render_html('import')
+        body += render_html('downloads')
+        body += render_html(
+            'library',
+            crumbs=''.join(crumbs),
+            refresh_url=html.escape(self.path.split('#')[0], quote=True),
+            folder=html.escape(folder, quote=True),
+            sort_name=' selected' if sort == 'name' else '',
+            sort_type=' selected' if sort == 'type' else '',
+            sort_size=' selected' if sort == 'size' else '',
+            sort_modified=' selected' if sort == 'modified' else '',
+            direction_asc=' selected' if direction == 'asc' else '',
+            direction_desc=' selected' if direction == 'desc' else '',
+            files=library['html'] or '',
+        )
         initial = json.dumps({'runs': [run_view(run, []) for run in runs], 'transfers': [], 'error': None, 'library': library}).replace('<', '\\u003c')
-        body += '<script type="application/json" id="initial-runs">' + initial + '</script>'
-        body += '<script>' + LIVE_JS + '</script>'
+        body += render_html('initial-state', state=initial)
+        body += render_html('script', source=LIVE_JS)
         self.send(page(body))
 
 if __name__ == '__main__':
