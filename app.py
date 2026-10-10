@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 import urllib.error
@@ -637,19 +638,29 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 if not target.is_dir():
                     raise ValueError('Not a folder')
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/zip')
-                self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + urllib.parse.quote(target.name + '.zip'))
-                self.send_header('X-Content-Type-Options', 'nosniff')
-                self.end_headers()
-                # ponytail: ZipFile writes directly to the socket, avoiding a playlist-sized buffer.
-                with zipfile.ZipFile(self.wfile, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
-                    for base, dirs, files in os.walk(target):
-                        dirs[:] = [d for d in dirs if inside(str((Path(base) / d).relative_to(self.download_root())), self.download_root()).is_dir()]
-                        for name in files:
-                            file = Path(base) / name
-                            if file.is_file() and file.resolve().is_relative_to(self.download_root()):
-                                archive.write(file, file.relative_to(target))
+                # ponytail: temporary disk space buys an exact size for native browser progress.
+                with tempfile.TemporaryFile() as source:
+                    try:
+                        # Audio is already compressed; storing it makes ZIP preparation faster.
+                        with zipfile.ZipFile(source, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+                            for base, dirs, files in os.walk(target):
+                                dirs[:] = [d for d in dirs if inside(str((Path(base) / d).relative_to(self.download_root())), self.download_root()).is_dir()]
+                                for name in files:
+                                    file = Path(base) / name
+                                    if file.is_file() and file.resolve().is_relative_to(self.download_root()):
+                                        archive.write(file, file.relative_to(target))
+                    except OSError:
+                        self.send_error(503, 'ZIP could not be prepared. Please try again later.')
+                        return
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/zip')
+                    self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + urllib.parse.quote(target.name + '.zip'))
+                    self.send_header('Content-Length', str(source.tell()))
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.send_header('Cache-Control', 'no-store')
+                    self.end_headers()
+                    source.seek(0)
+                    shutil.copyfileobj(source, self.wfile, length=256 * 1024)
         except (ValueError, FileNotFoundError) as error:
             self.send(page(render_html('error', message=html.escape(str(error)))), status=400)
 
