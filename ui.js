@@ -27,6 +27,7 @@ const bytes = (n) => {
   return (i ? n.toFixed(1) : Math.round(n)) + " " + u[i];
 };
 const labels = {
+  "youtube waiting": "Waiting for YouTube recovery",
   "youtube searching": "Recovering on YouTube…",
   "youtube checking": "Checking YouTube match…",
   "youtube downloading": "Downloading from YouTube",

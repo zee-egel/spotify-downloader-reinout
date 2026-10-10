@@ -2,3 +2,11 @@
 state.json
 downloads/
 __pycache__/
+.env.*
+!.env.example
+.private-workflows/
+before.json
+*.backup.json
+*-before-*.json
+slskd live.json
+n8n-backups/

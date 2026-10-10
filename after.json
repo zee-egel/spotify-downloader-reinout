@@ -1,0 +1,3633 @@
+{
+  "name": "Spotify playlist downloader",
+  "nodes": [
+    {
+      "id": "514cb985-75f6-438a-8b99-1459fd8d4ee5",
+      "name": "When clicking \u2018Execute workflow\u2019",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        992
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a6e99739-38ee-4adf-8953-f3f58d111748",
+      "name": "Get results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        3120,
+        912
+      ],
+      "parameters": {
+        "url": "=https://slskd.example.com/api/v0/searches/{{ $('Search slskd request').item.json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "b7ae3b6f-133f-4a89-a8c9-7222aabfac65",
+      "name": "Search slskd request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        2448,
+        1088
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://slskd.example.com/api/v0/searches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { searchText: $json.primaryArtist + \" \" + $json.title } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "735811fc-bc9f-490c-b7b1-4b0ed805819e",
+      "name": "Get responses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        3792,
+        752
+      ],
+      "parameters": {
+        "url": "=https://slskd.example.com/api/v0/searches/{{ $('Get results').item.json.id }}/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "b2868c07-f208-4098-862c-d149107d9865",
+      "name": "Code in JavaScript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        752
+      ],
+      "parameters": {
+        "jsCode": "const state = $('Search State').itemMatching(0).json;\nconst track = state.track;\nconst responses = $input.all().map(item => item.json);\n\n/** Normalize file text for matching. @param {unknown} value Text to normalize. @returns {string} Comparable text. */\nfunction norm(value) {\n  return String(value ?? '').normalize('NFKD').toLowerCase()\n    .replace(/[\\\\/_()[\\].-]+/g, ' ').replace(/[^\\p{L}\\p{N}]+/gu, ' ')\n    .replace(/\\s+/g, ' ').trim();\n}\n\nconst artist = norm(track.primaryArtist);\nconst title = norm(track.title);\nconst versions = ['karaoke', 'instrumental', 'tribute', 'cover', 'live', 'remix', 'bootleg', 'mashup', 'transition', 'edit', 'rework', 'vip', 'acoustic', 'nightcore', 'sped up', 'slowed'];\nconst candidates = responses.flatMap(peer => (peer.files ?? []).flatMap(file => {\n  const filename = String(file.filename ?? '');\n  const name = norm(filename.split(/[\\\\/]/).pop());\n  const path = norm(filename);\n  const ext = filename.split('.').pop()?.toLowerCase();\n  if (file.isLocked || !['flac', 'mp3', 'm4a', 'aac', 'ogg', 'wav', 'aiff'].includes(ext) || !Number.isFinite(Number(file.size)) || Number(file.size) < 100000) return [];\n  const artistMatch = Boolean(artist) && path.includes(artist);\n  const titleMatch = Boolean(title) && name.includes(title);\n  const length = Number(file.length);\n  const durationDifference = Number.isFinite(length) && length > 0 ? Math.abs(length - Number(track.durationSeconds)) : null;\n  const unwanted = versions.filter(word => name.includes(word) && !title.includes(word));\n  let score = (artistMatch ? 45 : 0) + (titleMatch ? 65 : 0) + (artistMatch && titleMatch ? 35 : 0);\n  if (durationDifference !== null) score += durationDifference <= 2 ? 60 : durationDifference <= 4 ? 40 : durationDifference <= 7 ? 20 : durationDifference <= 15 ? -30 : -80;\n  score -= unwanted.length * 60;\n  score += ext === 'flac' ? 12 : ext === 'mp3' ? 8 : 0;\n  const rate = Number(file.bitRate);\n  if (ext === 'mp3' && Number.isFinite(rate)) score += rate >= 320 && rate <= 500 ? 6 : rate >= 256 ? 4 : rate >= 192 ? 2 : rate > 0 && rate < 128 ? -5 : 0;\n  if (peer.hasFreeUploadSlot) score += 3;\n  if (Number(peer.queueLength) === 0) score += 2;\n  return [{ score, artistMatch, titleMatch, unwanted, durationDifference,\n    spotifyId: track.spotifyId, spotifyTitle: track.title, spotifyArtist: track.artist,\n    spotifyDuration: track.durationSeconds, spotifyUrl: track.spotifyUrl,\n    searchId: state.searchId, username: peer.username, filename, size: file.size,\n    bitRate: file.bitRate, length: file.length, hasFreeUploadSlot: peer.hasFreeUploadSlot,\n    queueLength: peer.queueLength, uploadSpeed: peer.uploadSpeed }];\n}));\n\ncandidates.sort((a, b) => b.score - a.score);\nconst best = candidates[0];\nconst next = candidates[1];\nconst fallbackCandidate = candidates.find(candidate => candidate.username !== best?.username && candidate.artistMatch && candidate.titleMatch && candidate.durationDifference !== null && candidate.durationDifference <= 4 && candidate.unwanted.length === 0 && candidate.score >= 175) ?? null;\nconst fastFallbackCandidate = candidates.find(candidate => candidate.username !== best?.username && candidate.artistMatch && candidate.titleMatch && candidate.durationDifference !== null && candidate.durationDifference <= 4 && candidate.unwanted.length === 0 && candidate.score >= 175 && candidate.hasFreeUploadSlot === true && Number(candidate.queueLength) === 0) ?? null;\nconst margin = best && next ? best.score - next.score : null;\nconst exact = best?.artistMatch && best?.titleMatch && best?.durationDifference !== null && best.durationDifference <= 4 && best.unwanted.length === 0;\nconst rival = next && margin < 8 && (!next.artistMatch || !next.titleMatch || next.durationDifference === null || next.durationDifference > 7 || next.unwanted.length > 0);\nconst status = !best ? 'no_match' : exact && best.score >= 175 && !rival ? 'AUTO_DOWNLOAD' : 'review';\nreturn [{ json: { ...best, status, reason: !best ? 'No playable unlocked files' : status === 'review' ? 'Low confidence or competing version' : 'High confidence', margin,\n  bestCandidate: best ?? null, runnerUp: next ?? null, fallbackCandidate, fastFallbackCandidate, candidateCount: candidates.length,\n  artist: track.artist, title: track.title, spotifyUrl: track.spotifyUrl, spotifyId: track.spotifyId, playlistName: track.playlistName }, pairedItem: { item: 0 } }];\n"
+      }
+    },
+    {
+      "id": "32169e90-154c-4c50-883a-f4bea0aaf55e",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3568,
+        848
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0d5541d4-c4f9-4fbc-928f-c207efb45ff1",
+              "leftValue": "={{ $json.isComplete }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e2c7a00d-23e3-4291-8d30-08e8a65467f6",
+      "name": "Wait",
+      "webhookId": "75a6ea5f-91ae-5993-b075-896456051ec1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4016,
+        992
+      ],
+      "parameters": {
+        "amount": 2
+      }
+    },
+    {
+      "id": "8215dab6-5d19-4cd1-83a0-e4dc8b94a040",
+      "name": "Queue Download",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        4912,
+        672
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://slskd.example.com/api/v0/transfers/downloads/batches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { searchId: $json.searchId, username: $json.username, files: [{ filename: $json.filename, size: $json.size }], options: { destination: $json.playlistName } } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "613bd6cc-9870-4a4b-b9d6-8833963fea17",
+      "name": "Playlist Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        208,
+        1088
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0f5d9851-b0a5-4151-945f-2d9423f2232d",
+              "name": "playlistUrl",
+              "value": "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b7e39860-90c9-44ac-a445-cf718af11711",
+      "name": "Code in JavaScript1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        1088
+      ],
+      "parameters": {
+        "jsCode": "const input = $json.playlistUrl.trim();\n\nconst match = input.match(/(?:playlist\\/|spotify:playlist:)([A-Za-z0-9]+)/);\n\nif (!match) {\n  throw new Error('Could not find a Spotify playlist ID in this input');\n}\n\nreturn [{\n  json: {\n    playlistUrl: match[0],\n    playlistId: match[1]\n  }\n}];"
+      }
+    },
+    {
+      "id": "c25f8a16-40a8-40aa-b2c0-13a9037760f5",
+      "name": "Normalize Tracks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        1088
+      ],
+      "parameters": {
+        "jsCode": "const name = String($('Get Playlist').first().json.name ?? 'Spotify Playlist')\n  .replace(/[\\\\/:*?\"<>|\\u0000-\\u001f]/g, '_')\n  .replace(/\\.\\./g, '_')\n  .trim();\nconst playlistName = name && name !== '.' ? name : 'Spotify Playlist';\nconst pages = $input.all();\n\nconst playlistItems = pages.flatMap(page => page.json.items ?? []);\n\nreturn playlistItems\n  .map(entry => entry.item ?? entry.track)\n  .filter(track => track && (!track.type || track.type === 'track') && track.id && track.name && track.artists?.[0]?.name && Number.isFinite(track.duration_ms) && track.duration_ms > 0)\n  .map(track => {\n    const artists = (track.artists ?? [])\n      .map(a => a.name)\n      .filter(Boolean);\n\n    return {\n      json: {\n        playlistName,\n        spotifyId: track.id,\n        title: track.name,\n        primaryArtist: artists[0] ?? '',\n        artist: artists.join(', '),\n        artists,\n        album: track.album?.name ?? null,\n        durationMs: track.duration_ms,\n        durationSeconds: track.duration_ms / 1000,\n        spotifyUrl: track.external_urls?.spotify ?? null\n      }\n    };\n  });"
+      }
+    },
+    {
+      "id": "aaaa3d1d-572c-45be-8ba9-364bccc2b6f5",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        1088
+      ],
+      "parameters": {
+        "url": "=https://api.spotify.com/v1/playlists/{{ $json.id }}/items",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "spotifyOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.next }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.body.next === null }}"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "spotifyOAuth2Api": {
+          "name": "Spotify OAuth"
+        }
+      }
+    },
+    {
+      "id": "44720959-6ec2-4e3e-a8c0-2862e7106681",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1776,
+        1088
+      ],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "ddac709f-7016-4ded-bcae-6c854f4e01db",
+      "name": "Search Started",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2672,
+        1088
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "agent-={{ !!$json.id }}",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a8d7e765-294b-4a02-bf09-81f535295bfb",
+      "name": "Search Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5136,
+        1376
+      ],
+      "parameters": {
+        "jsCode": "const track = $('Loop Over Items').itemMatching(0).json;\nreturn [{ json: { status: 'error', reason: String($json.error?.message ?? $json.error ?? 'Search request failed'), artist: track.artist, title: track.title, spotifyUrl: track.spotifyUrl, spotifyId: track.spotifyId }, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "fd598191-7457-40ab-98d4-ce4e8a2070f5",
+      "name": "Search State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3344,
+        848
+      ],
+      "parameters": {
+        "jsCode": "const track = $('Loop Over Items').itemMatching(0).json;\nconst started = Date.parse($json.startedAt ?? $('Search slskd request').itemMatching(0).json.startedAt);\nconst error = $json.error;\nreturn [{ json: { track, searchId: $json.id, isComplete: $json.isComplete === true, expired: !!error || !Number.isFinite(started) || Date.now() - started > 90000, status: error ? 'error' : 'search_timeout', reason: error ? String(error.message ?? error) : 'Search exceeded 90 seconds' }, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "20699e59-6f63-4004-bc2d-6788f3dca105",
+      "name": "Search Expired",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3792,
+        992
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "agent-={{ $json.expired }}",
+              "leftValue": "={{ $json.expired }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "16ff9122-e602-4a3f-92ef-f6f431410237",
+      "name": "Search Timeout",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        1184
+      ],
+      "parameters": {
+        "jsCode": "const track = $json.track;\nreturn [{ json: { status: $json.status, reason: $json.reason, artist: track.artist, title: track.title, spotifyUrl: track.spotifyUrl, spotifyId: track.spotifyId }, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "395aa51b-577c-4a5e-ad88-3ca42bf434d2",
+      "name": "Auto Download",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4240,
+        752
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "agent-={{ $json.status === \"AUTO_DOWNLOAD\" }}",
+              "leftValue": "={{ $json.status === \"AUTO_DOWNLOAD\" }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8b82d30a-8ab2-4289-8479-c23943a166f8",
+      "name": "Queue Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5136,
+        672
+      ],
+      "parameters": {
+        "jsCode": "const result = $('Code in JavaScript').itemMatching(0).json;\nconst batch = $json.batch;\nconst failures = $json.failures ?? [];\nconst error = $json.error;\nconst message = String(error?.message ?? failures[0]?.message ?? error ?? '');\nconst queued = Boolean(batch?.id && batch.transfers?.length);\nconst duplicate = /already|duplicate|exists|queued/i.test(message);\nreturn [{ json: { ...result, status: queued ? 'queued' : duplicate ? 'already/duplicate' : 'error',\n  reason: queued ? 'Queued for download' : message || 'No file was queued',\n  batchId: queued ? batch.id : null }, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "a4709875-090d-4755-8db4-b2d186770dff",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        128
+      ],
+      "parameters": {
+        "jsCode": "\nconst items = $input.all().map(item => item.json);\nconst counts = items.reduce((out,item) => {out[item.status]=(out[item.status]??0)+1; return out;}, {});\nconst downloads = items.filter(i => ['queued','completed'].includes(i.status));\nconst problems = items.filter(i => !['queued','completed'].includes(i.status));\nreturn [{json:{playlistName:items[0]?.playlistName ?? $('Get Playlist').first().json.name,\n  totalSpotifyTracks:items.length, queuedDownloads:downloads.length, downloads, problems,\n  batchIds:[...new Set(downloads.map(i=>i.batchId).filter(Boolean))], queuedAt:new Date().toISOString(),\n  duplicates:counts['already/duplicate']??0, reviewRequired:counts.review??0,\n  noMatch:counts.no_match??0, searchTimeouts:counts.search_timeout??0, errors:counts.error??0,\n  fallbackAttempts:items.filter(i=>i.youtubeAttempted).length}}];\n"
+      }
+    },
+    {
+      "id": "e6c70a96-4a89-4fe2-a4bf-1b35dcf5d541",
+      "name": "Get Playlist",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        656,
+        1088
+      ],
+      "parameters": {
+        "url": "=https://api.spotify.com/v1/playlists/{{ $json.playlistId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "spotifyOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "spotifyOAuth2Api": {
+          "name": "Spotify OAuth"
+        }
+      }
+    },
+    {
+      "id": "ef75b9f3-75da-46f5-a9a6-e78f5e55f9a4",
+      "name": "Playlist desk webhook",
+      "webhookId": "71814735-b6e9-5503-8d71-d1f0339625c5",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -16,
+        1184
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "playlist-import",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "ecea1259-42bc-4bee-823a-a3503a5a3102",
+      "name": "Send a text message",
+      "webhookId": "ec9374b5-7efe-5244-a90d-38e2437c5c59",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        7376,
+        560
+      ],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "8bb3d4b8-8586-48d1-b7d7-74002135bfed",
+      "name": "Get Download Transfers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        2448,
+        128
+      ],
+      "parameters": {
+        "url": "https://slskd.example.com/api/v0/transfers/downloads?includeRemoved=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "a89c5ba5-6727-4c17-9734-594a55799441",
+      "name": "Check Playlist Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        48
+      ],
+      "parameters": {
+        "jsCode": "\nlet summary = $('Summary').first().json;\ntry { summary = $('Wait for Downloads').last().json; } catch (_) { /* first poll */ }\ntry { const recovered = $('Restore YouTube State').last().json; if ((recovered.youtubeUpdatedAt ?? 0) > (summary.youtubeUpdatedAt ?? 0) || (recovered.fallbackAttempts ?? 0) > (summary.fallbackAttempts ?? 0)) summary = recovered; } catch (_) { /* no recovery yet */ }\nconst now = Date.now(), wait = 5 * 60 * 1000;\nconst elapsed = now - Date.parse(summary.queuedAt);\nconst input = $input.all();\n\nconst users = input.flatMap(i => Array.isArray(i.json) ? i.json : [i.json]);\nconst files = users.flatMap(u => (u.directories ?? []).flatMap(d => (d.files ?? []).map(f => ({...f, username:u.username}))));\nconst complete = f => typeof f.state === 'number' ? Boolean(f.state & 16) : /completed/i.test(String(f.state));\nconst succeeded = f => complete(f) && (typeof f.state === 'number' ? Boolean(f.state & 32) : /succeeded/i.test(String(f.state)));\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst downloads = (summary.downloads ?? []).map(d => {\n  const batch = files.filter(f => f.batchId === d.batchId);\n  const bytes = batch.reduce((n,f) => n + Number(f.bytesTransferred ?? 0), 0);\n  const successful = d.youtubeStatus === 'completed' || d.status === 'completed' || batch.some(succeeded);\n  const failed = d.youtubeAttempted && d.youtubeStatus !== 'completed';\n  const remoteFailure = batch.length > 0 && batch.every(complete) && !batch.some(succeeded);\n  const failedFile = batch.find(f => complete(f) && !succeeded(f));\n  const detail = failed ? (d.youtubeResult?.reason || d.reason || 'YouTube recovery failed')\n    : remoteFailure ? String(failedFile?.failureReason || failedFile?.error?.message || failedFile?.exception?.message || (typeof failedFile?.state === 'string' ? failedFile.state : 'Soulseek transfer ended without a completed file'))\n    : !batch.length && !successful ? 'Transfer is missing from slskd; download cannot be confirmed'\n    : batch.some(f => /queued.*remote/i.test(String(f.state))) ? 'Soulseek source is still queued remotely'\n    : 'Soulseek transfer is not finished';\n  return {...d, downloadOutcome:successful ? 'completed' : failed || remoteFailure ? 'unavailable' : 'pending', downloadReason:successful ? '' : detail,\n    progressBytes:bytes, progressAt:bytes > (d.progressBytes ?? 0) ? now : (d.progressAt ?? Date.parse(summary.queuedAt))};\n});\nlet pendingFallback = null;\nlet unresolved = false;\nfor (const d of downloads) {\n  if (d.youtubeStatus === 'completed' || d.youtubeAttempted) continue;\n  const batch = files.filter(f => f.batchId === d.batchId);\n  if (batch.some(succeeded)) continue;\n  unresolved = true;\n  if (pendingFallback) continue;\n  if (d.youtubeRetryAt > now) continue;\n  // Unknown/multiple transfers cannot safely be replaced: never guess that they failed.\n  if (batch.length !== 1) continue;\n  const f = batch[0];\n  const stalled = now - d.progressAt >= wait;\n  if (!complete(f) && !stalled) continue;\n  if (!d.youtubeRetryAt && d.fallbackAttempted && now - (d.fallbackAt ?? now) < wait) continue;\n  const alternate = d.fastFallbackCandidate ?? d.fallbackCandidate;\n  const different = alternate && (alternate.username !== f.username || alternate.filename !== f.filename);\n  const target = !d.fallbackAttempted && different ? 'soulseek' : 'youtube';\n  if (!complete(f) && (!f.id || !f.username)) continue;\n  if (d.cancelRetryAt && now - d.cancelRetryAt < wait) continue;\n  pendingFallback = {...metadata.get(d.spotifyId), ...d, target, fallbackCandidate:alternate,\n    kind:complete(f) ? 'failed' : 'remote', cancelUsername:f.username, cancelId:f.id};\n}\nconst eligible = new Set(['no_match','review','search_timeout','error']);\nfor (const p of summary.problems ?? []) {\n  if (!eligible.has(p.status) || p.youtubeAttempted) continue;\n  if (p.youtubeRetryAt > now) { unresolved = true; continue; }\n  unresolved = true;\n  if (!pendingFallback)\n    pendingFallback = {...metadata.get(p.spotifyId), ...p, target:'youtube', kind:'failed'};\n}\nconst ids = new Set(downloads.map(d => d.batchId).filter(Boolean));\nconst tracked = files.filter(f => ids.has(f.batchId));\nconst youtubeCompleted = downloads.filter(d => d.youtubeStatus === 'completed').length;\nconst timedOut = elapsed >= 48 * 60 * 60 * 1000;\nreturn [{json:{...summary, downloads, batchIds:[...ids],\n  completedFiles:tracked.filter(succeeded).length + youtubeCompleted,\n  failedFiles:[...downloads, ...(summary.problems ?? [])].filter(d => d.youtubeAttempted && d.youtubeStatus !== 'completed').length,\n  pendingFiles:tracked.filter(f => !complete(f)).length,\n  missingBatches:ids.size - new Set(tracked.map(f=>f.batchId)).size,\n  downloadingFiles:tracked.filter(f=>/downloading|transferring/i.test(String(f.state))).length,\n  queuedRemotely:tracked.filter(f=>/queued.*remote/i.test(String(f.state))).length,\n  queuedLocally:tracked.filter(f=>/queued.*local/i.test(String(f.state))).length,\n  pendingFallback:timedOut ? null : pendingFallback, pendingRemoteReports:[],\n  ready:timedOut || (!unresolved && !pendingFallback), timedOut}}];\n"
+      }
+    },
+    {
+      "id": "3464294d-4aff-4a0b-b211-b306219c7595",
+      "name": "Transfers Finished",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6928,
+        368
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e588f62f-be3a-4b5c-b94e-40ef3cca9319",
+              "leftValue": "={{ $json.ready }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d43259c6-fc3e-42a4-9c22-a547d9a8f0d0",
+      "name": "Wait for Downloads",
+      "webhookId": "014e0f67-14b8-5c4c-89a5-5b8e9f725b49",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        7152,
+        176
+      ],
+      "parameters": {
+        "amount": 10
+      }
+    },
+    {
+      "id": "93619923-52ce-4613-a4bd-a8989d5d76c0",
+      "name": "Completion Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7152,
+        560
+      ],
+      "parameters": {
+        "jsCode": "\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\t]+/g, ' ').trim();\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst describe = track => {\n  const t = {...metadata.get(track.spotifyId), ...track};\n  return `${clean(t.artist || t.primaryArtist) || 'Unknown artist'} \u2014 ${clean(t.title) || 'Untitled track'}`;\n};\nconst reasonFor = t => clean(t.youtubeResult?.reason || t.downloadReason || t.reason || t.fallbackError).slice(0, 500) || ({\n  no_match:'No matching Soulseek file', review:'No confident Soulseek match',\n  search_timeout:'Soulseek search timed out', error:'Soulseek search or queue request failed',\n  'already/duplicate':'Already queued elsewhere; not downloaded by this run',\n  queued:'Waiting for the Soulseek source', pending:'Waiting for transfer status',\n}[t.status] || 'No verified download; source did not provide a failure reason');\nfunction messages(lines) {\n  // Keep every track, splitting at Telegram-safe boundaries rather than dropping a tail.\n  const chunks = [];\n  let current = '';\n  for (const line of lines) {\n    for (let offset = 0; offset < line.length || offset === 0;) {\n      let end = Math.min(offset + 3400, line.length);\n      if (end < line.length && /[\\uD800-\\uDBFF]/.test(line[end - 1])) end--;\n      const part = line.slice(offset, end);\n      offset = end || 1;\n      if (current && current.length + part.length + 1 > 3500) { chunks.push(current); current = ''; }\n      current += (current ? '\\n' : '') + part;\n    }\n  }\n  if (current) chunks.push(current);\n  return chunks.map((message, i) => ({json:{message:chunks.length > 1 ? `(${i + 1}/${chunks.length})\\n${message}` : message}, pairedItem:{item:0}}));\n}\n\nconst s = $json;\nconst tracks = new Map();\nconst priority = t => t.youtubeStatus === 'completed' || t.downloadOutcome === 'completed' || t.status === 'completed' ? 3 : t.youtubeAttempted ? 2 : t.status === 'already/duplicate' ? 0 : 1;\nfor (const t of [...(s.downloads ?? []), ...(s.problems ?? [])]) {\n  const key = t.spotifyId || `${t.artist}:${t.title}`;\n  if (!tracks.has(key) || priority(t) > priority(tracks.get(key))) tracks.set(key, t);\n}\nfor (const t of metadata.values())\n  if (!tracks.has(t.spotifyId)) tracks.set(t.spotifyId, {...t, status:'unknown', reason:'No track result was reported by the workflow'});\nconst all = [...tracks.values()];\nconst complete = all.filter(t => t.youtubeStatus === 'completed' || t.downloadOutcome === 'completed' || t.status === 'completed');\nconst recovered = complete.filter(t => t.youtubeStatus === 'completed');\nconst missing = all.filter(t => !complete.includes(t));\nconst recoveryFailed = missing.filter(t => t.youtubeAttempted && t.youtubeStatus !== 'completed');\nconst other = missing.filter(t => !recoveryFailed.includes(t));\nconst lines = [\n  `${missing.length ? '\u26a0\ufe0f Playlist finished with issues' : '\u2705 Playlist downloads complete'}: ${clean(s.playlistName)}`,\n  `${complete.length} of ${all.length} unique songs downloaded; ${missing.length} not downloaded.`,\n];\nif (s.timedOut) lines.push('Monitoring ended after 48 hours. Pending transfers may still finish later; they are not confirmed downloads.');\nif (recovered.length) lines.push('', `\u2705 Recovered on YouTube (${recovered.length}):`, ...recovered.map(t => `\u2022 ${describe(t)}`));\nif (recoveryFailed.length) lines.push('', `\u274c Still not downloaded after YouTube (${recoveryFailed.length}):`, ...recoveryFailed.map(t => `\u2022 ${describe(t)} \u2014 ${reasonFor(t)}`));\nif (other.length) lines.push('', `Not downloaded (${other.length}):`, ...other.map(t => `\u2022 ${describe(t)} \u2014 ${reasonFor(t)}`));\nreturn messages(lines);\n"
+      }
+    },
+    {
+      "id": "43c9e25f-2030-487d-a05b-e91c845b8f91",
+      "name": "Fallback Available",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4464,
+        144
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2c9294dc-d020-4271-aaf1-13a6da2b7563",
+              "leftValue": "={{ $json.pendingFallback !== null }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9eebe7a0-92e9-4452-887a-d7531be27813",
+      "name": "Queue Fallback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        6032,
+        -64
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://slskd.example.com/api/v0/transfers/downloads/batches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { searchId: $json.pendingFallback.fallbackCandidate.searchId, username: $json.pendingFallback.fallbackCandidate.username, files: [{ filename: $json.pendingFallback.fallbackCandidate.filename, size: $json.pendingFallback.fallbackCandidate.size }], options: { destination: $json.playlistName } } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "a4e769aa-6bc0-430d-80cd-b255ead4da20",
+      "name": "Record Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6480,
+        -64
+      ],
+      "parameters": {
+        "jsCode": "const state = $('Check Playlist Completion').last().json;\nconst original = state.pendingFallback;\nconst batch = $json.batch;\nconst queued = Boolean(batch?.id && batch.transfers?.length);\nconst downloads = state.downloads.map(download => download.batchId === original.batchId\n  ? { ...download, fallbackAttempted: true, fallbackAt: Date.now(), progressAt: Date.now(), progressBytes: 0,\n fallbackStatus: queued ? 'queued' : 'queue_failed',\n      fallbackSource: original.fallbackCandidate.username, fallbackReason: original.kind, fallbackError: queued ? null : String($json.error?.message ?? $json.failures?.[0]?.message ?? 'No file was queued'),\n      batchId: queued ? batch.id : download.batchId }\n  : download);\nreturn [{ json: { ...state, downloads, batchIds: downloads.map(download => download.batchId),\n  fallbackAttempts: (state.fallbackAttempts ?? 0) + 1, pendingFallback: null, ready: false } }];"
+      }
+    },
+    {
+      "id": "b3e87f64-3b9b-44fc-8e22-8b09d7553f1e",
+      "name": "First Transfer Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3344,
+        48
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1faca786-7603-478b-b05a-047868b808bd",
+              "leftValue": "={{ $runIndex === 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "231d6c71-e162-41dd-bc0d-9df0d6f5b5f3",
+      "name": "Queue Summary Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3568,
+        -16
+      ],
+      "parameters": {
+        "jsCode": "\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\t]+/g, ' ').trim();\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst describe = track => {\n  const t = {...metadata.get(track.spotifyId), ...track};\n  return `${clean(t.artist || t.primaryArtist) || 'Unknown artist'} \u2014 ${clean(t.title) || 'Untitled track'}`;\n};\nconst reasonFor = t => clean(t.youtubeResult?.reason || t.downloadReason || t.reason || t.fallbackError).slice(0, 500) || ({\n  no_match:'No matching Soulseek file', review:'No confident Soulseek match',\n  search_timeout:'Soulseek search timed out', error:'Soulseek search or queue request failed',\n  'already/duplicate':'Already queued elsewhere; not downloaded by this run',\n  queued:'Waiting for the Soulseek source', pending:'Waiting for transfer status',\n}[t.status] || 'No verified download; source did not provide a failure reason');\nfunction messages(lines) {\n  // Keep every track, splitting at Telegram-safe boundaries rather than dropping a tail.\n  const chunks = [];\n  let current = '';\n  for (const line of lines) {\n    for (let offset = 0; offset < line.length || offset === 0;) {\n      let end = Math.min(offset + 3400, line.length);\n      if (end < line.length && /[\\uD800-\\uDBFF]/.test(line[end - 1])) end--;\n      const part = line.slice(offset, end);\n      offset = end || 1;\n      if (current && current.length + part.length + 1 > 3500) { chunks.push(current); current = ''; }\n      current += (current ? '\\n' : '') + part;\n    }\n  }\n  if (current) chunks.push(current);\n  return chunks.map((message, i) => ({json:{message:chunks.length > 1 ? `(${i + 1}/${chunks.length})\\n${message}` : message}, pairedItem:{item:0}}));\n}\n\nconst s = $json;\nconst all = [...(s.downloads ?? []), ...(s.problems ?? [])];\nconst complete = all.filter(t => t.youtubeStatus === 'completed' || t.downloadOutcome === 'completed' || t.status === 'completed');\nconst pending = all.filter(t => !complete.includes(t));\nreturn messages([\n  `\ud83d\udccb Playlist still processing: ${clean(s.playlistName)}`,\n  `${complete.length} songs downloaded; ${pending.length} tracks not downloaded yet.`,\n  ...pending.map(t => `\u2022 ${describe(t)} \u2014 ${reasonFor(t)}`),\n  'Downloads and recovery continue. A final update will list recovered and unavailable tracks.',\n]);\n"
+      }
+    },
+    {
+      "id": "9a535a11-2a77-490e-a2f8-a698307180c8",
+      "name": "Send Queue Summary",
+      "webhookId": "3ed50cdf-538b-5bb0-a664-b209b848a2ab",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        3792,
+        -16
+      ],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram bot"
+        }
+      }
+    },
+    {
+      "id": "b9f4c4f4-eaff-4176-9528-83cb994fa8b9",
+      "name": "Restore Transfer State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4016,
+        -16
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Check Playlist Completion').last().json }];"
+      }
+    },
+    {
+      "id": "c1f54a20-01fd-405c-b851-396a1525e62c",
+      "name": "Remote Still Pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4240,
+        48
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "11b09132-473a-4f19-a231-a57169b8d0a3",
+              "leftValue": "={{ $json.pendingRemoteReports.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "af7dc728-1d8d-4a6f-bb69-6f37d70c6750",
+      "name": "Remote Pending Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5808,
+        -288
+      ],
+      "parameters": {
+        "jsCode": "\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\t]+/g, ' ').trim();\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst describe = track => {\n  const t = {...metadata.get(track.spotifyId), ...track};\n  return `${clean(t.artist || t.primaryArtist) || 'Unknown artist'} \u2014 ${clean(t.title) || 'Untitled track'}`;\n};\nconst reasonFor = t => clean(t.youtubeResult?.reason || t.downloadReason || t.reason || t.fallbackError).slice(0, 500) || ({\n  no_match:'No matching Soulseek file', review:'No confident Soulseek match',\n  search_timeout:'Soulseek search timed out', error:'Soulseek search or queue request failed',\n  'already/duplicate':'Already queued elsewhere; not downloaded by this run',\n  queued:'Waiting for the Soulseek source', pending:'Waiting for transfer status',\n}[t.status] || 'No verified download; source did not provide a failure reason');\nfunction messages(lines) {\n  // Keep every track, splitting at Telegram-safe boundaries rather than dropping a tail.\n  const chunks = [];\n  let current = '';\n  for (const line of lines) {\n    for (let offset = 0; offset < line.length || offset === 0;) {\n      let end = Math.min(offset + 3400, line.length);\n      if (end < line.length && /[\\uD800-\\uDBFF]/.test(line[end - 1])) end--;\n      const part = line.slice(offset, end);\n      offset = end || 1;\n      if (current && current.length + part.length + 1 > 3500) { chunks.push(current); current = ''; }\n      current += (current ? '\\n' : '') + part;\n    }\n  }\n  if (current) chunks.push(current);\n  return chunks.map((message, i) => ({json:{message:chunks.length > 1 ? `(${i + 1}/${chunks.length})\\n${message}` : message}, pairedItem:{item:0}}));\n}\n\nconst s = $json;\nreturn messages([\n  `\u23f3 Tracks still queued remotely: ${clean(s.playlistName)}`,\n  ...(s.pendingRemoteReports ?? []).map(t => `\u2022 ${describe(t)} \u2014 ${t.fallbackAttempted ? 'Alternate source is also queued remotely' : 'No free alternate source'}`),\n  'These are still pending, not failed downloads. Monitoring continues.',\n]);\n"
+      }
+    },
+    {
+      "id": "ca1245f0-a963-4fc5-85f2-8dc9aa024675",
+      "name": "Send Remote Pending",
+      "webhookId": "abb453f2-7b9f-52e6-bcf3-4870a1407651",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        6032,
+        -288
+      ],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram bot"
+        }
+      }
+    },
+    {
+      "id": "3971f56c-9c6c-41a3-a597-f236220701b4",
+      "name": "Record Remote Notice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6480,
+        -288
+      ],
+      "parameters": {
+        "jsCode": "const state = $('Check Playlist Completion').last().json;\nconst ids = new Set(state.pendingRemoteReports.map(download => download.batchId));\nconst downloads = state.downloads.map(download => ids.has(download.batchId) ? { ...download, remoteReported: true } : download);\nreturn [{ json: { ...state, downloads, pendingRemoteReports: [] } }];"
+      }
+    },
+    {
+      "id": "ba626d98-1c03-46d2-9d8d-58a305ac2579",
+      "name": "Report Queue Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        2224,
+        128
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'queued', state: $json } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "a549f6af-cedf-4315-97d6-9281e2069a5b",
+      "name": "Report Transfer Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        2896,
+        48
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: $json.ready ? 'final' : 'progress', state: $json } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "c78718ee-fed2-4ee4-9504-5fa05cfb8248",
+      "name": "Report Fallback Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        6704,
+        -64
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'progress', state: $json } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "405aab8b-8625-4163-b4ba-b64474d6306e",
+      "name": "Report Cancel Failure Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        6480,
+        176
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'progress', state: $json } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "b50b118a-f955-490a-a0d1-3c60de3bfe3a",
+      "name": "Report Remote Notice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        6704,
+        -288
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'progress', state: $json } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "a707a121-c459-452c-9c34-2f6a968adb9a",
+      "name": "Restore Check State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        48
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Check Playlist Completion').last().json }];"
+      }
+    },
+    {
+      "id": "d326101c-c610-4923-a924-b965d6c9e6ac",
+      "name": "Restore Recorded Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7216,
+        -240
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Record Fallback').last().json }];"
+      }
+    },
+    {
+      "id": "49ef3dfc-368a-4310-b71a-e2145d24408d",
+      "name": "Restore Cancel Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6704,
+        176
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Record Cancel Failure').last().json }];"
+      }
+    },
+    {
+      "id": "f5da995f-468e-47f2-9855-ffca29482e71",
+      "name": "Restore Remote Notice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6928,
+        -288
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Record Remote Notice').last().json }];"
+      }
+    },
+    {
+      "id": "e12f8421-9da3-4666-a77a-517bf0725308",
+      "name": "Remote Queue Fallback",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4688,
+        48
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7d21ec88-a77c-4110-9681-1b377e169ce2",
+              "leftValue": "={{ $json.pendingFallback.kind === 'remote' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "df0c42de-cbce-4b08-97ac-25b23c4c9d72",
+      "name": "Cancel Remote Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        4912,
+        128
+      ],
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://slskd.example.com/api/v0/transfers/downloads/' + encodeURIComponent($json.pendingFallback.cancelUsername) + '/' + encodeURIComponent($json.pendingFallback.cancelId) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "29028017-015f-4270-adaf-22c77ed7e0c1",
+      "name": "Remote Cancel Succeeded",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5136,
+        128
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a8dc62d6-dd18-4026-9550-522618ba2678",
+              "leftValue": "={{ !$json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a281bc67-8bcf-4edc-a048-8708d104f7fb",
+      "name": "Verify Remote Cancel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        5360,
+        48
+      ],
+      "parameters": {
+        "url": "https://slskd.example.com/api/v0/transfers/downloads?includeRemoved=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Soulseek API auth"
+        }
+      }
+    },
+    {
+      "id": "a4763491-77c5-4655-948a-633ce8ae0a04",
+      "name": "Check Remote Cancel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5584,
+        48
+      ],
+      "parameters": {
+        "jsCode": "const state = $('Check Playlist Completion').last().json;\nconst users = $input.all().flatMap(item => Array.isArray(item.json) ? item.json : [item.json]);\nconst files = users.flatMap(user => (user.directories ?? []).flatMap(dir => dir.files ?? []));\nconst original = files.find(file => file.batchId === state.pendingFallback.batchId);\nconst value = String(original?.state ?? '');\nconst succeeded = typeof original?.state === 'number' ? (original.state & 48) === 48 : /completed.*succeeded/i.test(value);\nconst active = original && (typeof original.state === 'number' ? (original.state & 16) === 0 : !/completed/i.test(value));\nconst safe = !$input.all().some(item => item.json?.error) && Boolean(original) && !succeeded && !active;\nreturn [{ json: { ...state, cancelSafe: safe } }];"
+      }
+    },
+    {
+      "id": "bb4b20af-aba2-400a-a474-eeb290cf5195",
+      "name": "Cancelled and Safe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5808,
+        48
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "477e60e5-cf5d-4fd0-aff2-6fdb6c4e02da",
+              "leftValue": "={{ $json.cancelSafe }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5ad4b60d-70fd-471e-a14f-cf2abb75e670",
+      "name": "Record Cancel Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6032,
+        176
+      ],
+      "parameters": {
+        "jsCode": "\nconst state = $('Check Playlist Completion').last().json;\nconst downloads = state.downloads.map(d => d.batchId === state.pendingFallback.batchId\n  ? {...d, cancelRetryAt:Date.now()} : d);\nreturn [{json:{...state, downloads, pendingFallback:null, ready:false}}];\n"
+      }
+    },
+    {
+      "id": "c1ef6116-634f-4c16-82f9-cf027fbfd8f9",
+      "name": "Wait1",
+      "webhookId": "ba0ac5bd-b928-50a8-be81-5ebafa27dcc5",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2896,
+        912
+      ],
+      "parameters": {
+        "amount": 15
+      }
+    },
+    {
+      "id": "c7f34b39-c61a-49e3-86ec-9f36e6c4534e",
+      "name": "Report Playlist Tracks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        1328,
+        1088
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'queued', state: { playlistName: $('Get Playlist').first().json.name, resolving: true, totalSpotifyTracks: $('Normalize Tracks').all().length, tracks: $('Normalize Tracks').all().map(item => ({ spotifyId: item.json.spotifyId, title: item.json.title, artist: item.json.artist, status: 'pending' })) } } }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "dc3e7694-eac6-46f6-b13c-1a771f90ad9e",
+      "name": "Restore Playlist Tracks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        1088
+      ],
+      "parameters": {
+        "jsCode": "return $('Normalize Tracks').all();"
+      }
+    },
+    {
+      "id": "778479ab-14e7-4650-a430-6802ff46b9d1",
+      "name": "Report Searching Track",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        2000,
+        1088
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'queued', state: { resolving: true, track: { ...$json, status: 'searching' } } } }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "eda1e632-18ea-41bc-b328-a37cc7acd082",
+      "name": "Restore Searching Track",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        1088
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Loop Over Items').itemMatching(0).json, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "69aca86d-b713-4143-a6fb-72b87ef9cec1",
+      "name": "Report Selected Track",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        4464,
+        672
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'queued', state: { resolving: true, track: { ...$json, status: 'matching' } } } }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "27e15f3c-0092-4604-a2c8-3019f82599ab",
+      "name": "Restore Selected Track",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4688,
+        672
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Code in JavaScript').itemMatching(0).json, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "f100e614-c3dd-46f9-b067-93919d50ff8f",
+      "name": "Track Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5360,
+        1088
+      ],
+      "parameters": {
+        "jsCode": "return $input.all();"
+      }
+    },
+    {
+      "id": "79802f4c-836d-48cc-8476-69c08394fdaa",
+      "name": "Report Track Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        5584,
+        1088
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'queued', state: { resolving: true, track: $json } } }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "b578fcf6-9391-4669-93c4-8fdc3cfea452",
+      "name": "Restore Track Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5808,
+        1296
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Track Result').itemMatching(0).json, pairedItem: { item: 0 } }];"
+      }
+    },
+    {
+      "id": "f377b760-db8f-419d-9597-82610de78118",
+      "name": "Youtube fallback",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        6256,
+        -32
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6a5536e3-0d14-412c-af3c-8fe02403f365",
+              "leftValue": "",
+              "rightValue": "={{ $json.pendingFallback.target === 'youtube' }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "01eee70b-e42a-4cd8-9ad5-65fad011743c",
+              "leftValue": "",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "youtube-fallback-choice",
+      "name": "YouTube Fallback",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5008,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7d21ec88-a77c-4110-9681-1b377e169ce2",
+              "leftValue": "={{ $json.pendingFallback.target === 'youtube' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "youtube-command",
+      "name": "Download YouTube Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        5200,
+        704
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/youtube-download",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {profileId: $('Playlist desk webhook').first().json.body.profileId ?? 'owner', submissionId: $('Playlist desk webhook').first().json.body.submissionId, track: $json.pendingFallback} }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "youtube-record",
+      "name": "Record YouTube Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5408,
+        704
+      ],
+      "parameters": {
+        "jsCode": "\nconst state = $('Check Playlist Completion').last().json;\nconst original = state.pendingFallback;\nlet result;\ntry { result = $json; } catch (_) { result = {status:'failed', reason:'YouTube command failed'}; }\nconst status = ['completed','no_match','failed'].includes(result?.status) ? result.status : 'failed';\nif (status === 'failed' && !result?.reason) result = {...result, status, reason:result?.error ? 'YouTube request failed; a disconnected request may still finish on the download host.' : 'YouTube downloader returned no usable result.'};\nconst retryable = status === 'failed' && result?.retryable === true;\nconst retries = (original.youtubeRetries ?? 0) + (retryable ? 1 : 0);\nconst done = !retryable || retries >= 8;\nconst retryAt = done ? null : Date.now() + 60000;\nif (retryable && done) result = {...result, reason:'YouTube downloader remained busy after eight attempts; try this track again later.'};\nconst success = status === 'completed';\nconst update = {...original, youtubeStatus:status,\n  youtubeAttempted:done, youtubeResult:result, youtubeOriginalReason:original.youtubeOriginalReason ?? original.downloadReason ?? original.reason ?? ({no_match:'No matching Soulseek file',review:'No confident Soulseek match',search_timeout:'Soulseek search timed out',error:'Soulseek search or queue request failed'}[original.status] || 'Soulseek download did not finish'), youtubeRetries:retries, youtubeRetryAt:retryAt, fallbackSource:'YouTube', fallbackAttempted:true,\n  fallbackAt:original.fallbackAt ?? Date.now(),\n  ...(success ? {status:'completed', batchId:null, username:'YouTube', filename:result.filename} : {})};\ndelete update.target;\ndelete update.kind;\nlet downloads = state.downloads.map(d => d.spotifyId === original.spotifyId ? {...d,...update} : d);\nlet problems = state.problems.map(p => p.spotifyId === original.spotifyId ? {...p,...update} : p);\nif (success && !downloads.some(d => d.spotifyId === original.spotifyId)) downloads.push(update);\nif (success) problems = problems.filter(p => p.spotifyId !== original.spotifyId);\nreturn [{json:{...state, youtubeUpdatedAt:Date.now(), downloads, problems, batchIds:downloads.map(d=>d.batchId).filter(Boolean),\n  queuedDownloads:downloads.length, noMatch:problems.filter(p=>p.status==='no_match').length,\n  reviewRequired:problems.filter(p=>p.status==='review').length,\n  searchTimeouts:problems.filter(p=>p.status==='search_timeout').length,\n  errors:problems.filter(p=>p.status==='error').length,\n  fallbackAttempts:(state.fallbackAttempts ?? 0) + (done ? 1 : 0), pendingFallback:null, ready:false}}];\n"
+      }
+    },
+    {
+      "id": "youtube-report",
+      "name": "Report YouTube Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        5600,
+        704
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'progress', state: $json } }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "youtube-restore",
+      "name": "Restore YouTube State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5808,
+        704
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Record YouTube Result').last().json}];"
+      }
+    },
+    {
+      "id": "immediate-youtube-fallback",
+      "name": "Immediate YouTube Fallback",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6048,
+        1296
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7d21ec88-a77c-4110-9681-1b377e169ce2",
+              "leftValue": "={{ ['no_match', 'review', 'search_timeout', 'error'].includes($json.status) && !$json.youtubeAttempted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "download-unmatched-track",
+      "name": "Download Unmatched Track",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        6272,
+        1200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/youtube-download",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {profileId: $('Playlist desk webhook').first().json.body.profileId ?? 'owner', submissionId: $('Playlist desk webhook').first().json.body.submissionId, track: {...$('Normalize Tracks').all().find(i => i.json.spotifyId === $json.spotifyId).json, ...$json}} }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "record-immediate-youtube-result",
+      "name": "Record Immediate YouTube Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6512,
+        1200
+      ],
+      "parameters": {
+        "jsCode": "\nconst original = $('Restore Track Result').itemMatching(0).json;\nlet result = $json;\nconst status = ['completed','no_match','failed'].includes(result?.status) ? result.status : 'failed';\nif (status === 'failed' && !result?.reason) result = {...result, status, reason:result?.error ? 'YouTube request failed; a disconnected request may still finish on the download host.' : 'YouTube downloader returned no usable result.'};\nconst retryable = status === 'failed' && result?.retryable === true;\nconst retries = (original.youtubeRetries ?? 0) + (retryable ? 1 : 0);\nconst done = !retryable || retries >= 8;\nconst retryAt = done ? null : Date.now() + 60000;\nif (retryable && done) result = {...result, reason:'YouTube downloader remained busy after eight attempts; try this track again later.'};\nreturn [{json:{...original, status:status === 'completed' ? 'completed' : original.status,\n  youtubeStatus:status, youtubeAttempted:done, youtubeResult:result, youtubeOriginalReason:original.youtubeOriginalReason ?? original.downloadReason ?? original.reason ?? ({no_match:'No matching Soulseek file',review:'No confident Soulseek match',search_timeout:'Soulseek search timed out',error:'Soulseek search or queue request failed'}[original.status] || 'Soulseek download did not finish'), youtubeRetries:retries, youtubeRetryAt:retryAt,\n  reason:result.reason ?? (status === 'failed' ? 'YouTube download failed' : ''),\n  fallbackSource:'YouTube', fallbackAttempted:true,\n  ...(status === 'completed' ? {batchId:null, username:'YouTube', filename:result.filename} : {})},\n  pairedItem:{item:0}}];\n"
+      }
+    },
+    {
+      "id": "report-immediate-youtube-result",
+      "name": "Report Immediate YouTube Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueRegularOutput",
+      "position": [
+        6752,
+        1200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { playlistId: $('Code in JavaScript1').first().json.playlistId, submissionId: $('Playlist desk webhook').first().json.body.submissionId, phase: 'queued', state: { resolving: true, track: $json } } }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      }
+    },
+    {
+      "id": "restore-immediate-youtube-result",
+      "name": "Restore Immediate YouTube Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6976,
+        1200
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Record Immediate YouTube Result').itemMatching(0).json, pairedItem:{item:0}}];"
+      }
+    },
+    {
+      "id": "send-a-text-message-owner?",
+      "name": "Send a text message Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        7216,
+        560
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Send a text message Owner?",
+              "leftValue": "={{ ($('Playlist desk webhook').first().json.body.profileId ?? 'owner') === 'owner' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "send-a-text-message-private",
+      "name": "Send a text message Private",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        7376,
+        700
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {submissionId: $('Playlist desk webhook').first().json.body.submissionId, message: $json.message} }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "send-queue-summary-owner?",
+      "name": "Send Queue Summary Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3632,
+        -16
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Send Queue Summary Owner?",
+              "leftValue": "={{ ($('Playlist desk webhook').first().json.body.profileId ?? 'owner') === 'owner' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "send-queue-summary-private",
+      "name": "Send Queue Summary Private",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        3792,
+        124
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {submissionId: $('Playlist desk webhook').first().json.body.submissionId, message: $json.message} }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "send-remote-pending-owner?",
+      "name": "Send Remote Pending Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5872,
+        -288
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Send Remote Pending Owner?",
+              "leftValue": "={{ ($('Playlist desk webhook').first().json.body.profileId ?? 'owner') === 'owner' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "send-remote-pending-private",
+      "name": "Send Remote Pending Private",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        6032,
+        -148
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {submissionId: $('Playlist desk webhook').first().json.body.submissionId, message: $json.message} }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "youtube-start-message",
+      "name": "YouTube Start Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4700,
+        1900
+      ],
+      "parameters": {
+        "jsCode": "\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\t]+/g, ' ').trim();\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst describe = track => {\n  const t = {...metadata.get(track.spotifyId), ...track};\n  return `${clean(t.artist || t.primaryArtist) || 'Unknown artist'} \u2014 ${clean(t.title) || 'Untitled track'}`;\n};\nconst reasonFor = t => clean(t.youtubeResult?.reason || t.downloadReason || t.reason || t.fallbackError).slice(0, 500) || ({\n  no_match:'No matching Soulseek file', review:'No confident Soulseek match',\n  search_timeout:'Soulseek search timed out', error:'Soulseek search or queue request failed',\n  'already/duplicate':'Already queued elsewhere; not downloaded by this run',\n  queued:'Waiting for the Soulseek source', pending:'Waiting for transfer status',\n}[t.status] || 'No verified download; source did not provide a failure reason');\nfunction messages(lines) {\n  // Keep every track, splitting at Telegram-safe boundaries rather than dropping a tail.\n  const chunks = [];\n  let current = '';\n  for (const line of lines) {\n    for (let offset = 0; offset < line.length || offset === 0;) {\n      let end = Math.min(offset + 3400, line.length);\n      if (end < line.length && /[\\uD800-\\uDBFF]/.test(line[end - 1])) end--;\n      const part = line.slice(offset, end);\n      offset = end || 1;\n      if (current && current.length + part.length + 1 > 3500) { chunks.push(current); current = ''; }\n      current += (current ? '\\n' : '') + part;\n    }\n  }\n  if (current) chunks.push(current);\n  return chunks.map((message, i) => ({json:{message:chunks.length > 1 ? `(${i + 1}/${chunks.length})\\n${message}` : message}, pairedItem:{item:0}}));\n}\n\nconst state = $json;\nconst track = state.pendingFallback ?? state;\nreturn messages([\n  `\u26a0\ufe0f Soulseek has not downloaded this track: ${clean(track.playlistName || state.playlistName)}`,\n  `\u2022 ${describe(track)} \u2014 ${clean(track.youtubeOriginalReason) || reasonFor(track)}`,\n  (track.youtubeRetries ?? 0) > 0 ? 'Trying YouTube again now\u2026' : 'Trying YouTube now\u2026',\n]);\n"
+      }
+    },
+    {
+      "id": "youtube-start-restore",
+      "name": "YouTube Start Restore",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5350,
+        1900
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Check Playlist Completion').last().json}];"
+      }
+    },
+    {
+      "id": "youtube-start-send",
+      "name": "YouTube Start Send",
+      "webhookId": "365fc229-b34f-551b-88a2-034ba2162493",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        5050,
+        1900
+      ],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "youtube-start-send-owner?",
+      "name": "YouTube Start Send Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4890,
+        1900
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "YouTube Start Send Owner?",
+              "leftValue": "={{ ($('Playlist desk webhook').first().json.body.profileId ?? 'owner') === 'owner' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "youtube-start-send-private",
+      "name": "YouTube Start Send Private",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5050,
+        2040
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {submissionId: $('Playlist desk webhook').first().json.body.submissionId, message: $json.message} }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "immediate-youtube-start-message",
+      "name": "Immediate YouTube Start Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6050,
+        2500
+      ],
+      "parameters": {
+        "jsCode": "\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\t]+/g, ' ').trim();\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst describe = track => {\n  const t = {...metadata.get(track.spotifyId), ...track};\n  return `${clean(t.artist || t.primaryArtist) || 'Unknown artist'} \u2014 ${clean(t.title) || 'Untitled track'}`;\n};\nconst reasonFor = t => clean(t.youtubeResult?.reason || t.downloadReason || t.reason || t.fallbackError).slice(0, 500) || ({\n  no_match:'No matching Soulseek file', review:'No confident Soulseek match',\n  search_timeout:'Soulseek search timed out', error:'Soulseek search or queue request failed',\n  'already/duplicate':'Already queued elsewhere; not downloaded by this run',\n  queued:'Waiting for the Soulseek source', pending:'Waiting for transfer status',\n}[t.status] || 'No verified download; source did not provide a failure reason');\nfunction messages(lines) {\n  // Keep every track, splitting at Telegram-safe boundaries rather than dropping a tail.\n  const chunks = [];\n  let current = '';\n  for (const line of lines) {\n    for (let offset = 0; offset < line.length || offset === 0;) {\n      let end = Math.min(offset + 3400, line.length);\n      if (end < line.length && /[\\uD800-\\uDBFF]/.test(line[end - 1])) end--;\n      const part = line.slice(offset, end);\n      offset = end || 1;\n      if (current && current.length + part.length + 1 > 3500) { chunks.push(current); current = ''; }\n      current += (current ? '\\n' : '') + part;\n    }\n  }\n  if (current) chunks.push(current);\n  return chunks.map((message, i) => ({json:{message:chunks.length > 1 ? `(${i + 1}/${chunks.length})\\n${message}` : message}, pairedItem:{item:0}}));\n}\n\nconst state = $json;\nconst track = state.pendingFallback ?? state;\nreturn messages([\n  `\u26a0\ufe0f Soulseek has not downloaded this track: ${clean(track.playlistName || state.playlistName)}`,\n  `\u2022 ${describe(track)} \u2014 ${clean(track.youtubeOriginalReason) || reasonFor(track)}`,\n  (track.youtubeRetries ?? 0) > 0 ? 'Trying YouTube again now\u2026' : 'Trying YouTube now\u2026',\n]);\n"
+      }
+    },
+    {
+      "id": "immediate-youtube-start-restore",
+      "name": "Immediate YouTube Start Restore",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6700,
+        2500
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Restore Track Result').itemMatching(0).json, pairedItem:{item:0}}];"
+      }
+    },
+    {
+      "id": "immediate-youtube-start-send",
+      "name": "Immediate YouTube Start Send",
+      "webhookId": "181e542d-8a5c-5ae7-ac4b-8f6ee258e176",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        6400,
+        2500
+      ],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "immediate-youtube-start-send-owner?",
+      "name": "Immediate YouTube Start Send Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6240,
+        2500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Immediate YouTube Start Send Owner?",
+              "leftValue": "={{ ($('Playlist desk webhook').first().json.body.profileId ?? 'owner') === 'owner' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "immediate-youtube-start-send-private",
+      "name": "Immediate YouTube Start Send Private",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        6400,
+        2640
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {submissionId: $('Playlist desk webhook').first().json.body.submissionId, message: $json.message} }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "youtube-result-message",
+      "name": "YouTube Result Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5200,
+        3100
+      ],
+      "parameters": {
+        "jsCode": "\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\t]+/g, ' ').trim();\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst describe = track => {\n  const t = {...metadata.get(track.spotifyId), ...track};\n  return `${clean(t.artist || t.primaryArtist) || 'Unknown artist'} \u2014 ${clean(t.title) || 'Untitled track'}`;\n};\nconst reasonFor = t => clean(t.youtubeResult?.reason || t.downloadReason || t.reason || t.fallbackError).slice(0, 500) || ({\n  no_match:'No matching Soulseek file', review:'No confident Soulseek match',\n  search_timeout:'Soulseek search timed out', error:'Soulseek search or queue request failed',\n  'already/duplicate':'Already queued elsewhere; not downloaded by this run',\n  queued:'Waiting for the Soulseek source', pending:'Waiting for transfer status',\n}[t.status] || 'No verified download; source did not provide a failure reason');\nfunction messages(lines) {\n  // Keep every track, splitting at Telegram-safe boundaries rather than dropping a tail.\n  const chunks = [];\n  let current = '';\n  for (const line of lines) {\n    for (let offset = 0; offset < line.length || offset === 0;) {\n      let end = Math.min(offset + 3400, line.length);\n      if (end < line.length && /[\\uD800-\\uDBFF]/.test(line[end - 1])) end--;\n      const part = line.slice(offset, end);\n      offset = end || 1;\n      if (current && current.length + part.length + 1 > 3500) { chunks.push(current); current = ''; }\n      current += (current ? '\\n' : '') + part;\n    }\n  }\n  if (current) chunks.push(current);\n  return chunks.map((message, i) => ({json:{message:chunks.length > 1 ? `(${i + 1}/${chunks.length})\\n${message}` : message}, pairedItem:{item:0}}));\n}\n\nconst state = $json;\nconst original = $('Check Playlist Completion').last().json.pendingFallback;\nconst track = state.pendingFallback ?? [...(state.downloads ?? []), ...(state.problems ?? [])].find(t => t.spotifyId === original.spotifyId) ?? state;\nconst result = track.youtubeResult ?? {};\nconst success = track.youtubeStatus === 'completed';\nconst waiting = !track.youtubeAttempted && result.retryable === true;\nreturn messages([\n  `${success ? '\u2705 YouTube recovery succeeded' : waiting ? '\u23f3 YouTube recovery waiting' : '\u274c Still not downloaded after YouTube'}: ${clean(track.playlistName || state.playlistName)}`,\n  `\u2022 ${describe(track)} \u2014 ${success ? 'Downloaded and audio validated' : waiting ? 'Downloader busy; retry scheduled' : reasonFor(track)}`,\n]);\n"
+      }
+    },
+    {
+      "id": "youtube-result-restore",
+      "name": "YouTube Result Restore",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5850,
+        3100
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Record YouTube Result').last().json}];"
+      }
+    },
+    {
+      "id": "youtube-result-send",
+      "name": "YouTube Result Send",
+      "webhookId": "e3309c00-873f-5a7d-b3da-95f63bb5464f",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        5550,
+        3100
+      ],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "youtube-result-send-owner?",
+      "name": "YouTube Result Send Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5390,
+        3100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "YouTube Result Send Owner?",
+              "leftValue": "={{ ($('Playlist desk webhook').first().json.body.profileId ?? 'owner') === 'owner' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "youtube-result-send-private",
+      "name": "YouTube Result Send Private",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        5550,
+        3240
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {submissionId: $('Playlist desk webhook').first().json.body.submissionId, message: $json.message} }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "immediate-youtube-result-message",
+      "name": "Immediate YouTube Result Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6500,
+        3700
+      ],
+      "parameters": {
+        "jsCode": "\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\t]+/g, ' ').trim();\nconst metadata = new Map($('Normalize Tracks').all().map(i => [i.json.spotifyId, i.json]));\nconst describe = track => {\n  const t = {...metadata.get(track.spotifyId), ...track};\n  return `${clean(t.artist || t.primaryArtist) || 'Unknown artist'} \u2014 ${clean(t.title) || 'Untitled track'}`;\n};\nconst reasonFor = t => clean(t.youtubeResult?.reason || t.downloadReason || t.reason || t.fallbackError).slice(0, 500) || ({\n  no_match:'No matching Soulseek file', review:'No confident Soulseek match',\n  search_timeout:'Soulseek search timed out', error:'Soulseek search or queue request failed',\n  'already/duplicate':'Already queued elsewhere; not downloaded by this run',\n  queued:'Waiting for the Soulseek source', pending:'Waiting for transfer status',\n}[t.status] || 'No verified download; source did not provide a failure reason');\nfunction messages(lines) {\n  // Keep every track, splitting at Telegram-safe boundaries rather than dropping a tail.\n  const chunks = [];\n  let current = '';\n  for (const line of lines) {\n    for (let offset = 0; offset < line.length || offset === 0;) {\n      let end = Math.min(offset + 3400, line.length);\n      if (end < line.length && /[\\uD800-\\uDBFF]/.test(line[end - 1])) end--;\n      const part = line.slice(offset, end);\n      offset = end || 1;\n      if (current && current.length + part.length + 1 > 3500) { chunks.push(current); current = ''; }\n      current += (current ? '\\n' : '') + part;\n    }\n  }\n  if (current) chunks.push(current);\n  return chunks.map((message, i) => ({json:{message:chunks.length > 1 ? `(${i + 1}/${chunks.length})\\n${message}` : message}, pairedItem:{item:0}}));\n}\n\nconst state = $json;\nconst original = $('Restore Track Result').itemMatching(0).json;\nconst track = state.pendingFallback ?? [...(state.downloads ?? []), ...(state.problems ?? [])].find(t => t.spotifyId === original.spotifyId) ?? state;\nconst result = track.youtubeResult ?? {};\nconst success = track.youtubeStatus === 'completed';\nconst waiting = !track.youtubeAttempted && result.retryable === true;\nreturn messages([\n  `${success ? '\u2705 YouTube recovery succeeded' : waiting ? '\u23f3 YouTube recovery waiting' : '\u274c Still not downloaded after YouTube'}: ${clean(track.playlistName || state.playlistName)}`,\n  `\u2022 ${describe(track)} \u2014 ${success ? 'Downloaded and audio validated' : waiting ? 'Downloader busy; retry scheduled' : reasonFor(track)}`,\n]);\n"
+      }
+    },
+    {
+      "id": "immediate-youtube-result-restore",
+      "name": "Immediate YouTube Result Restore",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7150,
+        3700
+      ],
+      "parameters": {
+        "jsCode": "return [{json:$('Record Immediate YouTube Result').itemMatching(0).json, pairedItem:{item:0}}];"
+      }
+    },
+    {
+      "id": "immediate-youtube-result-send",
+      "name": "Immediate YouTube Result Send",
+      "webhookId": "d5804cf3-4dc9-50bf-8fbc-8186533cc9ef",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        6850,
+        3700
+      ],
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "name": "Telegram bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "immediate-youtube-result-send-owner?",
+      "name": "Immediate YouTube Result Send Owner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6690,
+        3700
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "Immediate YouTube Result Send Owner?",
+              "leftValue": "={{ ($('Playlist desk webhook').first().json.body.profileId ?? 'owner') === 'owner' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "immediate-youtube-result-send-private",
+      "name": "Immediate YouTube Result Send Private",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        6850,
+        3840
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Playlist callback auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://playlist.example.com/workflow-notify",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {submissionId: $('Playlist desk webhook').first().json.body.submissionId, message: $json.message} }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking \u2018Execute workflow\u2019": {
+      "main": [
+        [
+          {
+            "node": "Playlist Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get results": {
+      "main": [
+        [
+          {
+            "node": "Search State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search slskd request": {
+      "main": [
+        [
+          {
+            "node": "Search Started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get responses": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Get responses",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Expired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Get results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Auto Download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Playlist Input": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Get Playlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Normalize Tracks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Tracks": {
+      "main": [
+        [
+          {
+            "node": "Report Playlist Tracks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report Searching Track",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Started": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Error": {
+      "main": [
+        [
+          {
+            "node": "Track Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search State": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Expired": {
+      "main": [
+        [
+          {
+            "node": "Search Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Timeout": {
+      "main": [
+        [
+          {
+            "node": "Track Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Download": {
+      "main": [
+        [
+          {
+            "node": "Report Selected Track",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Track Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Download": {
+      "main": [
+        [
+          {
+            "node": "Queue Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Status": {
+      "main": [
+        [
+          {
+            "node": "Track Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary": {
+      "main": [
+        [
+          {
+            "node": "Report Queue Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Playlist": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Playlist desk webhook": {
+      "main": [
+        [
+          {
+            "node": "Playlist Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Download Transfers": {
+      "main": [
+        [
+          {
+            "node": "Check Playlist Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Playlist Completion": {
+      "main": [
+        [
+          {
+            "node": "Report Transfer Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transfers Finished": {
+      "main": [
+        [
+          {
+            "node": "Completion Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait for Downloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Downloads": {
+      "main": [
+        [
+          {
+            "node": "Get Download Transfers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Completion Message": {
+      "main": [
+        [
+          {
+            "node": "Send a text message Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Available": {
+      "main": [
+        [
+          {
+            "node": "Remote Queue Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Transfers Finished",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Fallback": {
+      "main": [
+        [
+          {
+            "node": "Record Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Fallback": {
+      "main": [
+        [
+          {
+            "node": "Report Fallback Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "First Transfer Check": {
+      "main": [
+        [
+          {
+            "node": "Queue Summary Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Remote Still Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Summary Message": {
+      "main": [
+        [
+          {
+            "node": "Send Queue Summary Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Queue Summary": {
+      "main": [
+        [
+          {
+            "node": "Restore Transfer State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Transfer State": {
+      "main": [
+        [
+          {
+            "node": "Remote Still Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remote Still Pending": {
+      "main": [
+        [
+          {
+            "node": "Remote Pending Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fallback Available",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remote Pending Message": {
+      "main": [
+        [
+          {
+            "node": "Send Remote Pending Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Remote Pending": {
+      "main": [
+        [
+          {
+            "node": "Record Remote Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Queue Status": {
+      "main": [
+        [
+          {
+            "node": "Get Download Transfers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Transfer Status": {
+      "main": [
+        [
+          {
+            "node": "Restore Check State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Check State": {
+      "main": [
+        [
+          {
+            "node": "First Transfer Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Fallback Status": {
+      "main": [
+        [
+          {
+            "node": "Restore Recorded Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Recorded Fallback": {
+      "main": [
+        [
+          {
+            "node": "Wait for Downloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Remote Notice": {
+      "main": [
+        [
+          {
+            "node": "Report Remote Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Remote Notice": {
+      "main": [
+        [
+          {
+            "node": "Restore Remote Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Remote Notice": {
+      "main": [
+        [
+          {
+            "node": "Wait for Downloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remote Queue Fallback": {
+      "main": [
+        [
+          {
+            "node": "Cancel Remote Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "YouTube Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancel Remote Queue": {
+      "main": [
+        [
+          {
+            "node": "Remote Cancel Succeeded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remote Cancel Succeeded": {
+      "main": [
+        [
+          {
+            "node": "Verify Remote Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Cancel Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Remote Cancel": {
+      "main": [
+        [
+          {
+            "node": "Check Remote Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Remote Cancel": {
+      "main": [
+        [
+          {
+            "node": "Cancelled and Safe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelled and Safe": {
+      "main": [
+        [
+          {
+            "node": "YouTube Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Cancel Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Cancel Failure": {
+      "main": [
+        [
+          {
+            "node": "Report Cancel Failure Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Cancel Failure Status": {
+      "main": [
+        [
+          {
+            "node": "Restore Cancel Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Cancel Failure": {
+      "main": [
+        [
+          {
+            "node": "Wait for Downloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Get results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Playlist Tracks": {
+      "main": [
+        [
+          {
+            "node": "Restore Playlist Tracks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Playlist Tracks": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Searching Track": {
+      "main": [
+        [
+          {
+            "node": "Restore Searching Track",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Searching Track": {
+      "main": [
+        [
+          {
+            "node": "Search slskd request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Selected Track": {
+      "main": [
+        [
+          {
+            "node": "Restore Selected Track",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Selected Track": {
+      "main": [
+        [
+          {
+            "node": "Queue Download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Result": {
+      "main": [
+        [
+          {
+            "node": "Report Track Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Track Result": {
+      "main": [
+        [
+          {
+            "node": "Restore Track Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Track Result": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Youtube fallback": {
+      "main": [
+        [
+          {
+            "node": "Record Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Fallback": {
+      "main": [
+        [
+          {
+            "node": "YouTube Start Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download YouTube Audio": {
+      "main": [
+        [
+          {
+            "node": "Record YouTube Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record YouTube Result": {
+      "main": [
+        [
+          {
+            "node": "YouTube Result Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report YouTube Status": {
+      "main": [
+        [
+          {
+            "node": "Restore YouTube State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore YouTube State": {
+      "main": [
+        [
+          {
+            "node": "Get Download Transfers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Fallback": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Start Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Unmatched Track": {
+      "main": [
+        [
+          {
+            "node": "Record Immediate YouTube Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Immediate YouTube Result": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Result Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Immediate YouTube Result": {
+      "main": [
+        [
+          {
+            "node": "Restore Immediate YouTube Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Immediate YouTube Result": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message Owner?": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message Private",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        []
+      ]
+    },
+    "Send a text message Private": {
+      "main": [
+        []
+      ]
+    },
+    "Send Queue Summary Owner?": {
+      "main": [
+        [
+          {
+            "node": "Send Queue Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Queue Summary Private",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Queue Summary Private": {
+      "main": [
+        [
+          {
+            "node": "Restore Transfer State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Remote Pending Owner?": {
+      "main": [
+        [
+          {
+            "node": "Send Remote Pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Remote Pending Private",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Remote Pending Private": {
+      "main": [
+        [
+          {
+            "node": "Record Remote Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Start Send Owner?": {
+      "main": [
+        [
+          {
+            "node": "YouTube Start Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "YouTube Start Send Private",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Start Send": {
+      "main": [
+        [
+          {
+            "node": "YouTube Start Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Start Send Private": {
+      "main": [
+        [
+          {
+            "node": "YouTube Start Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Start Message": {
+      "main": [
+        [
+          {
+            "node": "YouTube Start Send Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Start Restore": {
+      "main": [
+        [
+          {
+            "node": "Download YouTube Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Start Send Owner?": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Start Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Immediate YouTube Start Send Private",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Start Send": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Start Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Start Send Private": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Start Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Start Message": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Start Send Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Start Restore": {
+      "main": [
+        [
+          {
+            "node": "Download Unmatched Track",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Result Send Owner?": {
+      "main": [
+        [
+          {
+            "node": "YouTube Result Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "YouTube Result Send Private",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Result Send": {
+      "main": [
+        [
+          {
+            "node": "YouTube Result Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Result Send Private": {
+      "main": [
+        [
+          {
+            "node": "YouTube Result Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Result Message": {
+      "main": [
+        [
+          {
+            "node": "YouTube Result Send Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Result Restore": {
+      "main": [
+        [
+          {
+            "node": "Report YouTube Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Result Send Owner?": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Result Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Immediate YouTube Result Send Private",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Result Send": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Result Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Result Send Private": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Result Restore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Result Message": {
+      "main": [
+        [
+          {
+            "node": "Immediate YouTube Result Send Owner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Immediate YouTube Result Restore": {
+      "main": [
+        [
+          {
+            "node": "Report Immediate YouTube Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true,
+    "saveExecutionProgress": true
+  }
+}

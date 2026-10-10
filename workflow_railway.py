@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import sys
+from workflow_recovery import patch as recovery_patch
 from urllib.parse import urlsplit
 
 
@@ -44,7 +45,7 @@ def patch(workflow, slskd_url):
         if previous not in record['jsCode']:
             raise ValueError('Unrecognized YouTube recorder or already patched')
         record['jsCode'] = record['jsCode'].replace(previous, '$json')
-    return {key: workflow[key] for key in ('name', 'nodes', 'connections', 'settings')}
+    return recovery_patch(workflow) if 'Record YouTube Result' in nodes else {key: workflow[key] for key in ('name', 'nodes', 'connections', 'settings')}
 
 
 if __name__ == '__main__':

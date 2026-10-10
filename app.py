@@ -167,13 +167,13 @@ def run_view(run, transfers):
         youtube = (run.get('youtubeProgress') or {}).get(track.get('spotifyId')) or {}
         if track.get('youtubeAttempted'):
             status = 'completed' if track.get('youtubeStatus') == 'completed' else 'unavailable'
-        if youtube:
+        if youtube and not (youtube.get('status') == 'youtube waiting' and track.get('youtubeAttempted')):
             status = youtube['status']
         if state.get('phase') == 'final' and status not in ('completed', 'already/duplicate'):
             status = 'unavailable'
         tracks.append({'batchId': batch or next((file['batchId'] for file in files), ''),
             'spotifyId': track.get('spotifyId') or '', 'artist': track.get('artist') or '', 'title': track.get('title') or '',
-            'status': status, 'reason': youtube.get('reason') or (track.get('youtubeResult') or {}).get('reason') or track.get('reason') or '',
+            'status': status, 'reason': (((track.get('youtubeResult') or {}).get('reason') or track.get('reason')) if track.get('youtubeAttempted') else '') or youtube.get('reason') or (track.get('youtubeResult') or {}).get('reason') or track.get('reason') or '',
             'fallback': bool(track.get('fallbackAttempted') or youtube),
             'downloadSource': ('youtube' if youtube or track.get('youtubeStatus') == 'completed' or (track.get('fallbackSource') == 'YouTube' and not batch) else 'soulseek' if batch or track.get('username') else '') if status == 'completed' else '',
             'source': 'YouTube' if youtube else track.get('fallbackSource') if track.get('fallbackAttempted') else next((f['username'] for f in files), track.get('username') or ''),
@@ -584,28 +584,29 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, UnicodeError):
             self.send(b'{"status":"failed","reason":"Invalid YouTube request"}', kind='application/json', status=400)
             return
+        last_update = [0, None]
+        def report(**update):
+            now = time.monotonic()
+            if update['status'] == last_update[1] and now - last_update[0] < 1:
+                return
+            with STATE_LOCK:
+                runs = read_runs()
+                run = next((r for r in runs if r.get('submissionId') == payload.get('submissionId')
+                            and r.get('submissionId') and r.get('owner', 'owner') == payload.get('profileId', 'owner')), None)
+                if run:
+                    run.setdefault('youtubeProgress', {})[payload['track']['spotifyId']] = update
+                    save_runs(runs)
+            last_update[:] = [now, update['status']]
         # ponytail: one download at a time; move to a durable worker if more accounts need it.
         if not YOUTUBE_LOCK.acquire(blocking=False):
-            self.send(b'{"status":"failed","reason":"YouTube downloader busy"}', kind='application/json', status=409)
+            report(status='youtube waiting', percent=None, reason='Waiting for the active YouTube download. Recovery will retry shortly.', source='YouTube')
+            self.send(b'{"status":"failed","reason":"YouTube downloader busy; waiting to retry","retryable":true,"retryAfterSeconds":60}', kind='application/json', status=409)
             return
         try:
-            last_update = [0, None]
-            def report(**update):
-                now = time.monotonic()
-                if update['status'] == last_update[1] and now - last_update[0] < 1:
-                    return
-                with STATE_LOCK:
-                    runs = read_runs()
-                    run = next((r for r in runs if r.get('submissionId') == payload.get('submissionId')
-                                and r.get('submissionId') and r.get('owner', 'owner') == payload.get('profileId', 'owner')), None)
-                    if run:
-                        run.setdefault('youtubeProgress', {})[payload['track']['spotifyId']] = update
-                        save_runs(runs)
-                last_update[:] = [now, update['status']]
             result = main(urllib.parse.quote(json.dumps(payload)), progress=report)
             report(status='completed' if result['status'] == 'completed' else 'unavailable',
                    percent=100 if result['status'] == 'completed' else None,
-                   reason=result.get('reason', ''), source='YouTube')
+                   reason=result.get('reason', ''), source='YouTube', diagnostics=result.get('diagnostics', []), code=result.get('code', ''))
         finally:
             YOUTUBE_LOCK.release()
         self.send(json.dumps(result).encode(), kind='application/json')

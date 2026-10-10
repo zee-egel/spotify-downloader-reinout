@@ -8,10 +8,12 @@ RUN apt-get update && apt-get install --no-install-recommends -y python3 python3
     && /opt/venv/bin/pip install --no-cache-dir 'yt-dlp[default]'
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 WORKDIR /opt/playlist-desk
-COPY app.py profiles.py views.py ui.css ui.js profile.js youtube_fallback.py ./
+COPY app.py profiles.py views.py ui.css ui.js profile.js youtube_fallback.py download_doctor.py ./
 COPY templates ./templates
 COPY railway-start.sh ./
-RUN chmod +x railway-start.sh
+RUN /opt/venv/bin/python -c "from importlib.metadata import version; print(version('yt-dlp'), version('yt-dlp-ejs'))" \
+    && node --version && ffprobe -version \
+    && chmod +x railway-start.sh
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     STATE_FILE=/data/state/runs.json \

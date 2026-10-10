@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import sys
+from workflow_recovery import patch as recovery_patch
 
 
 def patch(workflow):
@@ -18,7 +19,7 @@ def patch(workflow):
         workflow['nodes'].append(node)
         return node
     choice = clone('Remote Queue Fallback', 'Immediate YouTube Fallback', 6040, 1296)
-    choice['parameters']['conditions']['conditions'][0]['leftValue'] = "={{ ['no_match', 'review', 'search_timeout'].includes($json.status) && !$json.youtubeAttempted }}"
+    choice['parameters']['conditions']['conditions'][0]['leftValue'] = "={{ ['no_match', 'review', 'search_timeout', 'error'].includes($json.status) && !$json.youtubeAttempted }}"
     request = clone('Download YouTube Audio', 'Download Unmatched Track', 6270, 1200)
     request['parameters']['jsonBody'] = "={{ {profileId: $('Playlist desk webhook').first().json.body.profileId ?? 'owner', submissionId: $('Playlist desk webhook').first().json.body.submissionId, track: {...$('Normalize Tracks').all().find(i => i.json.spotifyId === $json.spotifyId).json, ...$json}} }}"
     record = clone('Restore Track Result', 'Record Immediate YouTube Result', 6500, 1200)
@@ -64,7 +65,7 @@ return [{json:{playlistName:items[0]?.playlistName ?? $('Get Playlist').first().
     connections['Restore YouTube State'] = {'main': [[edge('Get Download Transfers')]]}
     params = nodes['Download YouTube Audio']['parameters']
     params['jsonBody'] = params['jsonBody'].replace('track: $json.pendingFallback', "submissionId: $('Playlist desk webhook').first().json.body.submissionId, track: $json.pendingFallback")
-    return {k: workflow[k] for k in ('name','nodes','connections','settings')}
+    return recovery_patch(workflow)
 
 
 if __name__ == '__main__':

@@ -33,6 +33,26 @@ The YouTube endpoint accepts JSON `{ "profileId": "owner", "submissionId": "..."
 
 Build locally with `docker build -f Dockerfile.railway -t playlist-desk-railway .`. Railway configuration references: [config as code](https://docs.railway.com/config-as-code/reference), [persistent volumes](https://docs.railway.com/volumes), [TCP proxy](https://docs.railway.com/networking/tcp-proxy). Live Railway deployment and peer connectivity require verification in your project.
 
+## Sharing completed music on Soulseek
+
+The combined Railway service shares completed audio recursively from `DOWNLOADS_ROOT` (default `/data/downloads`) under the Soulseek alias **Music**. This includes Soulseek and YouTube downloads and both profiles’ music. Dashboard authentication and profile isolation remain unchanged; Soulseek peers can browse and download the shared music.
+
+The startup command configures the share explicitly using slskd’s native `--shared` option. Incomplete downloads remain in the separate incomplete directory, and the share filter excludes non-audio files and temporary staging files. slskd rescans every 15 minutes by default; set `SLSKD_SHARE_CACHE_RETENTION` to a different interval in minutes if needed, or trigger a manual share scan in the slskd UI. These options take precedence over persisted YAML settings for the corresponding entries. Review any existing custom shares/filters after changing the startup command, since slskd merges list entries by index.
+
+For the separate Pi slskd service (which this repository’s Compose file does not start), add this to **that service’s** `slskd.yml`, keeping its other settings and shares:
+
+```yaml
+shares:
+  directories:
+    - '[Music]/downloads'
+  filters:
+    - '^(?!.*\.(mp3|flac|m4a|aac|ogg|opus|wav|aiff|aif|alac|ape|wma|webm)$).*'
+  cache:
+    retention: 15
+```
+
+Use the completed-download path **inside the slskd container** if it differs from `/downloads`. After restarting/redeploying, verify **Music** and its file count in slskd’s Shares view. Sharing can satisfy peers’ catalog requirements, but incoming peer connectivity is still necessary for uploads. See [slskd share configuration](https://github.com/slskd/slskd/blob/0.26.0/docs/config.md#shares).
+
 ## Playlist completion updates
 
 `workflow_completion.py` patches a fresh Railway workflow export to try YouTube immediately for unmatched, ambiguous, or timed-out searches. Apply it after the YouTube and Railway patches, publish the resulting workflow, and deploy the dashboard changes. Failed transfers can recover without the initial five-minute delay; active stalled transfers still require safe cancellation before replacement. Completion polling runs every ten seconds and immediately after a YouTube result.
@@ -109,3 +129,43 @@ The workflow now reports normalized track metadata before searching, the current
 The event stream also refreshes the current Library folder, preserving its sort and search, and displays live download activity above saved files. Updates normally arrive on the existing two-second polling interval; an unavailable slskd service can delay a cycle by its request timeout.
 
 The early-callback workflow version was applied through the n8n API. **Rebuild the app on the Pi** (`docker compose up -d --build`) after transferring these code changes to receive the new metadata and live Library behavior. No running playlist was restarted. `workflow_live_updates.py` preserves the workflow patch as source: apply it to an export of the previous workflow to produce an API update body. It refuses to patch an already-updated workflow. `python3 test_workflow.py` verifies callback payloads and loop routing without API credentials.
+
+## Download reliability and diagnosis
+
+YouTube recovery now searches up to three query variants, deduplicates results, and tries up to six candidates within the existing four-minute budget. A broken extraction, timeout, or invalid candidate no longer aborts the other candidates. Featured-artist credits and remaster-year labels are normalized while live, remix, cover, edit and other version checks remain. Duration remains within 2–5 seconds for ordinary uploads; an exactly matching artist Topic channel allows 2% up to eight seconds. Downloaded audio must pass the same duration check before atomic publication to Library.
+
+Results retain the existing `completed`, `no_match`, and `failed` contract and add a failure `code` and bounded candidate `diagnostics`. Reasons distinguish bot checks, rate limiting, denied access, unavailable videos, missing runtimes, validation and storage failures. Raw extractor output and credentials are never returned. The dashboard retains these diagnostics in its run state and shows the human-readable reason in track details.
+
+The endpoint returns HTTP 409 with `retryable: true` and `retryAfterSeconds: 60` **only when no download was started because the worker was busy**. Workflow patches retry that explicit response up to eight total attempts with a one-minute cooldown. Network errors and disconnected requests are terminal because the original download may still be running. The waiting state is visible in the dashboard.
+
+For an already configured workflow, export it and generate a reviewable upgrade locally:
+
+```sh
+python3 workflow_recovery.py before.json after.json
+```
+
+This command only writes a JSON file. It does not connect to n8n, publish, or deploy. New YouTube/Railway/completion patches include the same changes. Existing running workflows keep their original behavior until an updated export is applied by the operator.
+
+Run the read-only diagnostic on the actual download host:
+
+```sh
+python3 download_doctor.py --slskd
+```
+
+It reports installed yt-dlp/EJS, Node and ffprobe versions, recorded recovery outcome codes, and API reachability without exposing credentials. Node must be at least version 22; keep yt-dlp and EJS updated together (`python3 -m pip install --upgrade 'yt-dlp[default]'` in the execution environment). Railway builds now verify that these runtime components are present. See the [official yt-dlp runtime instructions](https://github.com/yt-dlp/yt-dlp/wiki/EJS).
+
+From a separate machine/network, probe the configured public peer endpoint with `python3 download_doctor.py --peer-host HOST --peer-port PORT`. A successful TCP probe does **not** prove Soulseek advertised-address correctness; verify incoming peer connections in slskd. Railway peer routing, remote peers, private videos and YouTube bot blocks cannot be repaired by local matching code. Correct forwarding or a compatible download host is still necessary; consult [slskd networking configuration](https://github.com/slskd/slskd/blob/master/docs/config.md).
+
+## Telegram recovery notifications
+
+`workflow_notifications.py` upgrades a current workflow export with per-track notices before each YouTube attempt and after its result. Each notice includes the artist, title, and an actual failure reason (or explicitly says the source did not report one). Busy workers are reported as waiting with a retry scheduled. The final message lists every recovered song and every song still not downloaded, using actual outcomes rather than old search-error counts. Queue and remote-pending notices also retain all titles. Long lists are split across messages within Telegram limits; no “and more” truncation is used. Monitoring timeouts retain pending/unconfirmed wording.
+
+The existing owner Telegram bot/credential is preserved; other profiles are routed through the authenticated `/workflow-notify` callback to their private Profile bot settings. Notification failures do not stop downloads. The n8n attribution footer is disabled for these messages. The patch also bypasses the stray `Youtube fallback` If node that interrupted the alternate Soulseek queue path in the supplied export.
+
+Run `python3 workflow_notifications.py current-export.json updated-export.json` for an offline upgrade. Updating an already active workflow through this instance’s API automatically republishes it, so use the live API only when intending to publish the change. Existing executions retain their old workflow logic; notification improvements apply to new runs. The app/Railway deployment is separate: the new image configures completed-audio sharing and provides the YouTube runtime, but successful peer uploads and YouTube extraction still require functioning network access on the deployment host.
+
+## Public workflow template
+
+`after.json` is a sanitized, reusable workflow template. Set the `slskd.example.com` and `playlist.example.com` origins, bind the named credential references to your own n8n credentials, replace `YOUR_TELEGRAM_CHAT_ID`, and replace the manual `YOUR_PLAYLIST_ID` example before using it. Its webhook path is `playlist-import`; configure your dashboard webhook URL to match the imported workflow. Credential IDs, private service origins, the original webhook identifiers, and the original sample playlist have been removed. This template is not a drop-in replacement for an existing configured production workflow.
+
+The original configured export is kept locally in `.private-workflows/after.live.json` when sanitizing; that directory, `.env` variants, and common workflow backup files are ignored by Git. The sanitizer does not alter the running n8n workflow. To update an existing workflow, patch a fresh private export and replace it through the API; importing onto an occupied editor canvas appends nodes and can produce duplicate graphs.

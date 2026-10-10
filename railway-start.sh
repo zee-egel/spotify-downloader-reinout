@@ -35,7 +35,12 @@ stop() {
 trap 'stop; exit 0' TERM INT
 trap stop EXIT
 umask "$SLSKD_UMASK"
-gosu slskd /slskd/slskd --app-dir "$SLSKD_APP_DIR" &
+# Share completed audio from both profiles; keep staging files and non-audio out.
+# CLI options ensure a persisted slskd.yml cannot silently disable this share.
+gosu slskd /slskd/slskd --app-dir "$SLSKD_APP_DIR" \
+    --shared "[Music]$DOWNLOADS_ROOT" \
+    --share-filter '^(?!.*\.(mp3|flac|m4a|aac|ogg|opus|wav|aiff|aif|alac|ape|wma|webm)$).*' \
+    --share-cache-retention "${SLSKD_SHARE_CACHE_RETENTION:-15}" &
 pids+=("$!")
 gosu slskd python app.py &
 pids+=("$!")

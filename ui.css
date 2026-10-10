@@ -242,6 +242,7 @@ summary:hover { text-decoration: underline; text-underline-offset: 4px; }
   .run-stats div { display: block; }
   .run-stats span { display: block; }
   .track-row { flex-wrap: wrap; }
+  .track-info { flex-basis: calc(100% - 66px); }
   .track-row .badge { margin-left: 66px; }
   .transfer-top { flex-wrap: wrap; gap: 8px; }
   .transfer-top > div { width: 100%; }

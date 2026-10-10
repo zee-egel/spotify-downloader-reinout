@@ -97,6 +97,12 @@ return [{json:{...state, downloads, problems, batchIds:downloads.map(d=>d.batchI
 """
 
 
+from workflow_recovery import recovery_check, recovery_record
+
+CHECK = recovery_check(CHECK)
+RECORD = recovery_record(RECORD)
+
+
 def patch(workflow):
     workflow = copy.deepcopy(workflow)
     nodes = {n['name']: n for n in workflow['nodes']}

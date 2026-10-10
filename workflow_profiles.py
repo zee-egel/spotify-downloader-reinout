@@ -29,9 +29,11 @@ def patch(workflow):
             raise ValueError('Unrecognized destination or already patched: ' + name)
         params['jsonBody'] = params['jsonBody'].replace(previous,
             "destination: [$('Playlist desk webhook').first().json.body.downloadDirectory, $json.playlistName].filter(Boolean).join('/')")
-    for name in ('Send a text message', 'Send Queue Summary', 'Send Remote Pending'):
-        node = nodes[name]
-        assert node['parameters']['text'] == '={{ $json.message }}'
+    message_texts = ('={{ $json.message }}', "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}")
+    for node in workflow['nodes']:
+        is_notification = node['name'] in ('Send a text message', 'Send Queue Summary', 'Send Remote Pending') or node.get('type') == 'n8n-nodes-base.telegram'
+        if not is_notification or node['parameters'].get('text') not in message_texts:
+            continue
         node.update(type='n8n-nodes-base.httpRequest', typeVersion=4.5,
                     credentials={'httpHeaderAuth': copy.deepcopy(credential)}, onError='continueRegularOutput')
         node['parameters'] = {'method': 'POST', 'url': base + '/workflow-notify',
