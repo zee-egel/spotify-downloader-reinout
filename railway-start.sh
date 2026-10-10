@@ -21,6 +21,21 @@ if [[ "$SLSKD_URL" != "http://127.0.0.1:${SLSKD_HTTP_PORT}" ]]; then
     exit 1
 fi
 
+# slskd accepts share-cache intervals of at least 60 minutes.
+share_cache_retention="${SLSKD_SHARE_CACHE_RETENTION:-60}"
+if [[ ! "$share_cache_retention" =~ ^[0-9]+$ ]] || (( ${#share_cache_retention} > 10 )); then
+    echo 'SLSKD_SHARE_CACHE_RETENTION must be an integer between 60 and 2147483647 (minutes).' >&2
+    exit 1
+fi
+share_cache_retention=$((10#$share_cache_retention))
+if (( share_cache_retention < 60 )); then
+    echo 'Share-cache retention is below slskd’s minimum; using 60 minutes.' >&2
+    share_cache_retention=60
+elif (( share_cache_retention > 2147483647 )); then
+    echo 'SLSKD_SHARE_CACHE_RETENTION must not exceed 2147483647 minutes.' >&2
+    exit 1
+fi
+
 # Railway mounts its volume as root; both applications run as UID 1000.
 directories=("$(dirname "$STATE_FILE")" "$DOWNLOADS_ROOT" "$SLSKD_APP_DIR" "$SLSKD_INCOMPLETE_DIR" "$DOWNLOADS_ROOT/profiles" "$DOWNLOADS_ROOT/profiles/extra")
 mkdir -p "${directories[@]}"
@@ -40,7 +55,7 @@ umask "$SLSKD_UMASK"
 gosu slskd /slskd/slskd --app-dir "$SLSKD_APP_DIR" \
     --shared "[Music]$DOWNLOADS_ROOT" \
     --share-filter '^(?!.*\.(mp3|flac|m4a|aac|ogg|opus|wav|aiff|aif|alac|ape|wma|webm)$).*' \
-    --share-cache-retention "${SLSKD_SHARE_CACHE_RETENTION:-15}" &
+    --share-cache-retention "$share_cache_retention" &
 pids+=("$!")
 gosu slskd python app.py &
 pids+=("$!")
