@@ -1,6 +1,8 @@
 const sourceIcon = (source) => {
-  if (source === "youtube") return '<span class="track-source" title="Downloaded from YouTube"><svg role="img" aria-label="Downloaded from YouTube" viewBox="0 0 24 24"><path fill="#ff0033" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8Z"/><path fill="white" d="m9.6 15.6 6.3-3.6-6.3-3.6Z"/></svg></span>';
-  if (source === "soulseek") return '<span class="track-source" title="Downloaded from Soulseek"><img alt="Downloaded from Soulseek" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMA/wD/AP83WBt9AAAACXBIWXMAAA7EAAAOxAGVKw4bAAADG0lEQVR42gEQA+/8AP///////////////////////yEg/////////////////////////////////////wH///8AAAAAAAAAAAAAAAAiJQAIBAAABAAAAADW0wAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAA3tsACAwAEAwAEAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAABENAAkJAMbHAENCAAAAAAAAAAAAAAAAAAAAAAAAAAJLSgAAAAAAAAAAAAAAAAAAAAAICAAIDABLTgAICABDRgAAAAAAAAAAAAAAAAAyNQACEBAAW1oAAAAAAAAAAAAAAAAAtbYACAgACAgAtbYAvboAAAAAAAAAAAAAMjUAAPwAAf///2xqAAAAAPj8AAAAAJyaAAAAAFteAAAAAKWiAFNSAPj4APj4APf3APj4AM7PAAH///98egAAAAD4/AAA/AD4/AAAAAAA/AAAAADv9AD4+AD4+AD49AD39wDGxwAAAAACAAAAhIYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAxscAAAAAAAAAAgAAAAAAAISGABENAAgIAAgIAAgEAAAEAAAEAAkEAAAAAAD8AL2+AAAAAAAAAAAAAAH///8AAAAAAAAAAAAAAAAAAAB0dgD4+AAAAAD49ACcngAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAACAQAAAQAAAAAlJ4AAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAkJAAAEAIyOAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAACVlwAABACMigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB////AAAAAAAAAAAArqsA7/AAY2UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAFJVAAkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEtuhEWOEKNEAAAAAElFTkSuQmCC"></span>';
+  if (source === "youtube")
+    return '<span class="track-source" title="Downloaded from YouTube"><svg role="img" aria-label="Downloaded from YouTube" viewBox="0 0 24 24"><path fill="#ff0033" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8Z"/><path fill="white" d="m9.6 15.6 6.3-3.6-6.3-3.6Z"/></svg></span>';
+  if (source === "soulseek")
+    return '<span class="track-source" title="Downloaded from Soulseek"><img width="16" height="16" alt="Downloaded from Soulseek" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMA/wD/AP83WBt9AAAACXBIWXMAAA7EAAAOxAGVKw4bAAADG0lEQVR42gEQA+/8AP///////////////////////yEg/////////////////////////////////////wH///8AAAAAAAAAAAAAAAAiJQAIBAAABAAAAADW0wAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAA3tsACAwAEAwAEAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAABENAAkJAMbHAENCAAAAAAAAAAAAAAAAAAAAAAAAAAJLSgAAAAAAAAAAAAAAAAAAAAAICAAIDABLTgAICABDRgAAAAAAAAAAAAAAAAAyNQACEBAAW1oAAAAAAAAAAAAAAAAAtbYACAgACAgAtbYAvboAAAAAAAAAAAAAMjUAAPwAAf///2xqAAAAAPj8AAAAAJyaAAAAAFteAAAAAKWiAFNSAPj4APj4APf3APj4AM7PAAH///98egAAAAD4/AAA/AD4/AAAAAAA/AAAAADv9AD4+AD4+AD49AD39wDGxwAAAAACAAAAhIYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAxscAAAAAAAAAAgAAAAAAAISGABENAAgIAAgIAAgEAAAEAAAEAAkEAAAAAAD8AL2+AAAAAAAAAAAAAAH///8AAAAAAAAAAAAAAAAAAAB0dgD4+AAAAAD49ACcngAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAACAQAAAQAAAAAlJ4AAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAkJAAAEAIyOAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAACVlwAABACMigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB////AAAAAAAAAAAArqsA7/AAY2UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAFJVAAkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEtuhEWOEKNEAAAAAElFTkSuQmCC"></span>';
   return '<span class="track-source" aria-hidden="true"></span>';
 };
 const esc = (s) =>
@@ -22,15 +24,15 @@ const bytes = (n) => {
   return (i ? n.toFixed(1) : Math.round(n)) + " " + u[i];
 };
 const labels = {
-  "youtube searching": "Searching YouTube…",
+  "youtube searching": "Recovering on YouTube…",
   "youtube checking": "Checking YouTube match…",
   "youtube downloading": "Downloading from YouTube",
   "youtube validating": "Checking audio…",
   unavailable: "Unavailable",
   pending: "Waiting to search",
-  searching: "Searching…",
-  matching: "Queueing…",
-  "already/duplicate": "Already queued",
+  searching: "Searching Soulseek…",
+  matching: "Queueing on Soulseek…",
+  "already/duplicate": "Already queued elsewhere",
   completed: "Complete",
   downloading: "Downloading",
   "queued locally": "Queued",
@@ -48,11 +50,13 @@ const labels = {
 const label = (s) => labels[s] || "Needs attention";
 const badge = (s) =>
   '<span class="badge ' +
-  (s === "downloading" || s.startsWith("youtube ")
-    ? "active"
-    : /fail|error|timeout|no.?match|review|unavailable/.test(s)
-      ? "failed"
-      : "") +
+  (s === "completed"
+    ? "success"
+    : s === "downloading" || s.startsWith("youtube ")
+      ? "active"
+      : /fail|error|timeout|no.?match|review|unavailable/.test(s)
+        ? "failed"
+        : "") +
   '">' +
   esc(label(s)) +
   "</span>";
@@ -95,6 +99,9 @@ function replaceList(node, markup) {
     : null;
   const file = active?.closest("[data-path]")?.dataset.path;
   const href = active?.getAttribute("href");
+  const run = active?.dataset.run;
+  const focusKey = active?.closest("[data-key]")?.dataset.key;
+  const activeTag = active?.tagName;
   const scroll = node.scrollTop;
   node.innerHTML = markup;
   node._markup = markup;
@@ -113,6 +120,20 @@ function replaceList(node, markup) {
       .find(
         (el) =>
           el.tagName === active.tagName && el.getAttribute("href") === href,
+      )
+      ?.focus({ preventScroll: true });
+  }
+  if (active && !file) {
+    const scope =
+      [...node.querySelectorAll("[data-key]")].find(
+        (el) => el.dataset.key === focusKey,
+      ) || node;
+    [...scope.querySelectorAll("a, button, summary")]
+      .find(
+        (el) =>
+          el.tagName === activeTag &&
+          el.getAttribute("href") === href &&
+          el.dataset.run === run,
       )
       ?.focus({ preventScroll: true });
   }
@@ -139,7 +160,7 @@ function transferMarkup(rows) {
         esc(g.name) +
         '</span><span class="count">' +
         g.rows.length +
-        " files</span></summary>" +
+        (g.rows.length === 1 ? " file" : " files") + "</span></summary>" +
         g.rows
           .map((t) => {
             const detailKey =
@@ -157,14 +178,16 @@ function transferMarkup(rows) {
               badge(t.kind) +
               "</div>" +
               (t.kind === "downloading"
-                ? progress(t.percent, t.name) +
+                ? (t.size ? progress(t.percent, t.name) : "") +
                   '<div class="transfer-bottom"><span>' +
                   bytes(t.done) +
                   (t.size ? " / " + bytes(t.size) : "") +
                   (t.speed ? " · " + bytes(t.speed) + "/s" : "") +
                   "</span><span>" +
-                  Math.round(t.percent) +
-                  "%</span></div>"
+                  (t.size
+                    ? Math.round(t.percent) + "%"
+                    : "File size not reported") +
+                  "</span></div>"
                 : "") +
               '<details class="track-details" data-key="' +
               esc(detailKey) +
@@ -311,18 +334,21 @@ function renderRuns() {
                     "queued remotely": "waiting for source",
                   }[k] || k),
               );
-            const status =
-              finished
-                ? (total && complete >= total ? "Complete" : "Finished")
-                : r.phase === "final"
-                  ? "Finished"
-                  : r.phase === "unconfirmed"
-                    ? "Awaiting confirmation"
-                    : ["submitted", "submitting", "resolving"].includes(r.phase)
-                      ? "Resolving…"
-                      : r.phase === "queued"
-                        ? "Queued"
-                        : "In progress";
+            const status = finished
+              ? total && complete >= total
+                ? "All songs downloaded"
+                : complete
+                  ? "Finished · partial success"
+                  : "Finished · no songs downloaded"
+              : r.phase === "final"
+                ? "Finished"
+                : r.phase === "unconfirmed"
+                  ? "Awaiting confirmation"
+                  : ["submitted", "submitting", "resolving"].includes(r.phase)
+                    ? "Resolving…"
+                    : r.phase === "queued"
+                      ? "Queued"
+                      : "In progress";
             const date = new Date(r.submitted),
               when = Number.isNaN(date.getTime())
                 ? ""
@@ -337,16 +363,22 @@ function renderRuns() {
               .slice(0, limit)
               .map(
                 (t, j) =>
-                  '<div class="track-row"><span class="track-number">' +
+                  '<div class="track-row" data-key="' +
+                  esc(key + ":row:" + (t.spotifyId || j)) +
+                  '"><span class="track-number">' +
                   (j + 1) +
-                  '</span>' + sourceIcon(t.downloadSource) + '<div class="track-info"><span class="track-title" title="' +
+                  "</span>" +
+                  sourceIcon(t.downloadSource) +
+                  '<div class="track-info"><span class="track-title" title="' +
                   esc(t.title) +
                   '">' +
                   esc(t.title || "Untitled track") +
                   '</span><div class="muted">' +
                   esc(t.artist) +
                   "</div>" +
-                  (t.reason ? '<div class="muted">' + esc(t.reason) + "</div>" : "") +
+                  (t.reason
+                    ? '<div class="muted">' + esc(t.reason) + "</div>"
+                    : "") +
                   (t.source
                     ? '<details class="track-details" data-key="' +
                       esc(key + ":track:" + j) +
@@ -357,7 +389,9 @@ function renderRuns() {
                     : "") +
                   "</div>" +
                   badge(t.status) +
-                  ((t.status === "downloading" || t.status === "youtube downloading") && t.percent != null
+                  ((t.status === "downloading" ||
+                    t.status === "youtube downloading") &&
+                  t.percent != null
                     ? '<span class="count">' +
                       Math.round(t.percent) +
                       "%</span>"
@@ -365,39 +399,99 @@ function renderRuns() {
                   "</div>",
               )
               .join("");
-            const active = r.tracks.find(t => t.status.startsWith("youtube ")) ||
-              r.tracks.find(t => ["downloading", "searching", "matching"].includes(t.status));
+            const active =
+              r.tracks.find((t) => t.status.startsWith("youtube ")) ||
+              r.tracks.find((t) =>
+                ["downloading", "searching", "matching"].includes(t.status),
+              );
+            const unavailable = c.unavailable || 0;
+            const activity = finished
+              ? complete
+                ? "Your music is ready"
+                : "This import has finished"
+              : active
+                ? label(active.status)
+                : r.phase === "unconfirmed"
+                  ? "Submission could not be confirmed"
+                  : ["submitted", "submitting", "resolving"].includes(r.phase)
+                    ? "Reading your playlist"
+                    : r.tracks.some((t) => t.status.includes("queued"))
+                      ? "Waiting for a source"
+                      : "Waiting for the next workflow update";
+            const description = finished
+              ? complete +
+                " song" +
+                (complete === 1 ? " is" : "s are") +
+                " downloaded." +
+                (unavailable
+                  ? " " + unavailable + " unavailable after recovery."
+                  : "") +
+                (c["already/duplicate"]
+                  ? " Some tracks were already queued elsewhere."
+                  : "")
+              : active
+                ? [active.artist, active.title].filter(Boolean).join(" — ") +
+                  (active.percent != null && /downloading/.test(active.status)
+                    ? " · " + Math.round(active.percent) + "%"
+                    : "")
+                : r.phase === "unconfirmed"
+                  ? "Check this import for updates before submitting again."
+                  : ["submitted", "submitting", "resolving"].includes(r.phase)
+                    ? "Track details appear as they arrive. Songs are searched one at a time."
+                    : r.tracks.some((t) => t.status.includes("queued"))
+                      ? "The source has not started sending these files. Available songs are already in your library."
+                      : "Progress appears when the download service reports a change.";
             return (
-              '<article class="run"><div class="run-header"><span class="artwork" aria-hidden="true">♫</span><div class="run-info"><h3 class="run-title" title="' +
-              esc(r.name) +
-              '">' +
+              '<article class="run" data-key="run:' +
+              esc(key) +
+              '"><div class="run-header"><span class="artwork" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="16" stroke="currentColor" stroke-width="1.5"/><circle cx="20" cy="20" r="10" stroke="currentColor"/><circle cx="20" cy="20" r="4" fill="currentColor"/></svg></span><div class="run-info"><h3 class="run-title">' +
               esc(r.name || "Spotify playlist") +
               '</h3><div class="muted">' +
               esc(when) +
               (total != null ? " · " + total + " tracks" : "") +
               '</div></div><span class="badge ' +
-              (status === "In progress" || status === "Resolving…"
-                ? "active"
-                : "") +
+              (finished ? (complete ? "success" : "failed") : "active") +
               '">' +
               status +
               "</span></div>" +
+              '<div class="run-stats"><div><strong>' +
+              handled +
+              "</strong><span>tracks handled</span></div><div><strong>" +
+              complete +
+              "</strong><span>songs downloaded</span></div><div><strong>" +
+              unavailable +
+              "</strong><span>unavailable</span></div></div>" +
               (total
-                ? progress(
-                    finished ? 100 : (handled / total) * 100,
+                ? '<div class="run-progress"><div class="progress-caption"><span>Track outcomes</span><span>' +
+                  handled +
+                  " / " +
+                  total +
+                  "</span></div>" +
+                  progress(
+                    (handled / total) * 100,
                     "Tracks handled",
                     finished,
-                  )
+                  ) +
+                  "</div>"
                 : "") +
-              (!finished && active ? '<p class="muted" role="status">' + esc(label(active.status) + ' · ' + active.artist + ' — ' + active.title) + (active.percent != null && /downloading/.test(active.status) ? ' · ' + Math.round(active.percent) + '%' : '') + '</p>' : '') +
-              '<div class="run-details"><div class="run-counts">' +
-              (total != null
-                ? handled + " of " + total + " handled · " + complete + " downloaded"
-                : "Waiting for track information") +
-              (counts.length ? " · " + esc(counts.join(" · ")) : "") +
-              '</div><details data-key="' +
+              '<div class="run-activity"><strong>' +
+              esc(activity) +
+              "</strong><span>" +
+              esc(description) +
+              "</span></div>" +
+              '<div class="run-details">' +
+              (counts.length && !finished
+                ? '<p class="run-counts">' + esc(counts.join(" · ")) + "</p>"
+                : "") +
+              '<div class="run-actions"><a class="link" href="#files">' +
+              (complete ? "Get downloaded music" : "Open library") +
+              '</a><a class="link" href="#transfers">Monitor transfers</a></div><details data-key="' +
               esc(key) +
-              '"><summary>View tracks</summary><div class="track-list">' +
+              '"' +
+              (!finished && i === 0 ? " open" : "") +
+              "><summary>View " +
+              (total != null ? total + " " : "") +
+              'tracks</summary><div class="track-list">' +
               (trackRows ||
                 '<p class="muted">Track details have not arrived yet.</p>') +
               "</div>" +
@@ -408,11 +502,11 @@ function renderRuns() {
                 : "") +
               '<a class="link" href="https://open.spotify.com/playlist/' +
               encodeURIComponent(r.id) +
-              '" target="_blank" rel="noopener noreferrer">Open in Spotify ↗</a></details></div></article>'
+              '" target="_blank" rel="noopener noreferrer">Open in Spotify (new tab)</a></details></div></article>'
             );
           })
           .join("")
-      : '<div class="empty">No playlists imported yet.</div>',
+      : '<div class="empty"><strong>Your collection starts here.</strong><p>No playlists imported yet. Paste a Spotify playlist above to find your songs and follow their downloads.</p></div>',
   );
   document.getElementById("clear-history").hidden = !snapshot.runs.length;
 }
@@ -430,12 +524,6 @@ function route() {
     { files: "Library", transfers: "Downloads", start: "Import" }[view] +
     " · Playlist desk";
 }
-for (const link of document.querySelectorAll(".nav a"))
-  link.addEventListener("click", (e) => {
-    if (!link.hash) return;
-    e.preventDefault();
-    location.hash = link.hash;
-  });
 runList.addEventListener("click", (e) => {
   const button = e.target.closest(".more-tracks");
   if (!button) return;
@@ -447,7 +535,16 @@ runList.addEventListener("click", (e) => {
   );
   details?.querySelector("summary")?.focus({ preventScroll: true });
 });
-window.addEventListener("hashchange", route);
+window.addEventListener("hashchange", () => {
+  route();
+  const heading = document.querySelector("[data-view]:not([hidden]) h1");
+  if (heading) {
+    heading.setAttribute("tabindex", "-1");
+    heading.focus({ preventScroll: true });
+  }
+  if (["#start", "#files", "#transfers"].includes(location.hash))
+    window.scrollTo(0, 0);
+});
 route();
 renderRuns();
 renderTransfers();
@@ -565,6 +662,10 @@ form.addEventListener("submit", async (e) => {
     input.setCustomValidity(
       "Paste a Spotify playlist link. Album and track links are not supported.",
     );
+    feedback.className = "error";
+    feedback.textContent =
+      "Use a Spotify playlist link or URI. Album and track links are not supported.";
+    input.focus();
     input.reportValidity();
     input.setAttribute("aria-invalid", "true");
     return;
@@ -589,7 +690,8 @@ form.addEventListener("submit", async (e) => {
           "The playlist could not be imported. Try again.",
       );
     }
-    feedback.textContent = "Playlist submitted.";
+    feedback.textContent =
+      "Playlist submitted. Track information will appear in your imports below.";
     input.value = "";
   } catch (error) {
     feedback.className = "error";
@@ -599,7 +701,7 @@ form.addEventListener("submit", async (e) => {
         : error.message;
   } finally {
     submit.disabled = false;
-    submit.textContent = "Import";
+    submit.textContent = "Import playlist";
     form.removeAttribute("aria-busy");
   }
 });

@@ -177,16 +177,52 @@ def settings_html(user, username):
     spotify = settings.get('spotify') or {}
     bot = settings.get('telegram') or {}
     esc = html.escape
-    return f'''<section><h1>Profile · {esc(username)}</h1>
-<h2>Spotify</h2><p>{esc(spotify.get('name', 'Not connected'))}</p>
-<form method="post" action="/spotify/connect"><button>Connect Spotify</button></form>
-<form method="post" action="/spotify/disconnect"><button class="danger">Disconnect Spotify</button></form>
-<h2>Telegram</h2><p>{esc(bot.get('name', 'No bot connected'))}</p>
-<p>Create a bot with @BotFather. Start your bot in Telegram before connecting your chat.</p>
-<form method="post" action="/profile/telegram">
-<p><label>Bot token <input type="password" name="token" autocomplete="new-password" placeholder="{'Leave blank to keep your token' if bot else 'BotFather token'}"></label></p>
-<p><label>Chat ID <input name="chat" inputmode="numeric" value="{esc(bot.get('chat', ''), quote=True)}" required></label></p>
-<button>Save bot</button></form>
-<form method="post" action="/profile/telegram-test"><button>Send test message</button></form>
-<form method="post" action="/profile/telegram-disconnect"><button class="danger">Disconnect bot</button></form>
-</section>'''
+    return f'''<section class="profile-page"><div class="page-heading"><h1>Your connections</h1><p>Manage Spotify access and download notifications.</p></div><div class="account-strip"><span class="account-avatar" aria-hidden="true">{esc(username[:1].upper())}</span><div><strong>{esc(username)}</strong><p class="muted">Your imports, files, and connections belong to this profile.</p></div></div>
+<section class="settings-section"><div><h2>Spotify</h2><p>Connect your account to import playlists, including your private collections.</p></div><div class="settings-content"><p class="connection-state"><span class="badge {'success' if spotify else ''}">{'Connected' if spotify else 'Not connected'}</span> {esc(spotify.get('name', ''))}</p><div class="settings-actions"><form method="post" action="/spotify/connect"><button class="primary">{'Reconnect Spotify' if spotify else 'Connect Spotify'}</button></form>{'<form method="post" action="/spotify/disconnect" onsubmit="return confirm(\'Disconnect Spotify? You can reconnect at any time.\')"><button class="danger">Disconnect Spotify</button></form>' if spotify else ''}</div></div></section>
+<section class="settings-section"><div><h2>Telegram</h2><p>Get playlist updates in your own chat.</p><p class="muted">Create a bot with @BotFather, then start a chat with your bot before connecting it here.</p></div><div class="settings-content"><p class="connection-state"><span class="badge {'success' if bot else ''}">{'Connected' if bot else 'Not connected'}</span> {esc(bot.get('name', ''))}</p>
+<form method="post" action="/profile/telegram" class="settings-form"><label for="bot-token">Bot token</label><input id="bot-token" type="password" name="token" autocomplete="new-password" spellcheck="false" aria-describedby="token-hint" placeholder="{'Leave blank to keep your token…' if bot else 'Paste your BotFather token…'}"><p class="hint" id="token-hint">{'Your saved token is kept private. Leave this blank to keep it.' if bot else 'Your token is saved privately and never displayed.'}</p><label for="chat-id">Chat ID</label><input id="chat-id" name="chat" autocomplete="off" spellcheck="false" inputmode="numeric" value="{esc(bot.get('chat', ''), quote=True)}" required><button class="primary">Save bot</button></form>
+{'<div class="settings-actions"><form method="post" action="/profile/telegram-test"><button>Send test message</button></form><form method="post" action="/profile/telegram-disconnect" onsubmit="return confirm(\'Disconnect Telegram notifications?\')"><button class="danger">Disconnect bot</button></form></div>' if bot else ''}
+</div></section><p id="settings-feedback" role="status"></p></section><script>
+const settingsForm = document.querySelector('.settings-form');
+let dirty = false;
+settingsForm.addEventListener('input', () => {{ dirty = true; }});
+window.addEventListener('beforeunload', event => {{
+  if (dirty) {{ event.preventDefault(); event.returnValue = ''; }}
+}});
+for (const form of document.querySelectorAll('.profile-page form')) {{
+  form.addEventListener('submit', async event => {{
+    if (event.defaultPrevented || form.action.endsWith('/spotify/connect')) return;
+    event.preventDefault();
+    const button = form.querySelector('button');
+    if (button.disabled) return;
+    const text = button.textContent;
+    const feedback = document.getElementById('settings-feedback');
+    button.disabled = true;
+    button.textContent = form.action.endsWith('telegram-test') ? 'Sending…' : 'Saving…';
+    feedback.className = 'hint';
+    feedback.textContent = form.action.endsWith('telegram-test') ? 'Sending test message…' : 'Updating connection…';
+    try {{
+      const response = await fetch(form.action, {{ method: 'POST', body: new URLSearchParams(new FormData(form)) }});
+      if (!response.ok) {{
+        const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+        throw Error(doc.querySelector('.error')?.textContent || 'The connection could not be updated. Check your details and try again.');
+      }}
+      if (form.action.endsWith('telegram-test')) {{
+        feedback.textContent = 'Test message sent. Check your Telegram chat.';
+      }} else {{
+        dirty = false;
+        location.href = '/profile';
+      }}
+    }} catch (error) {{
+      feedback.className = 'error';
+      feedback.textContent = error instanceof TypeError ? 'Connection lost. Check your settings before trying again.' : error.message;
+      feedback.setAttribute('tabindex', '-1');
+      feedback.focus();
+    }} finally {{
+      button.disabled = false;
+      button.textContent = text;
+    }}
+  }});
+}}
+</script>
+'''
