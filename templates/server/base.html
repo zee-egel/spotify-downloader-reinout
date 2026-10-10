@@ -6,9 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#f3f5f7" />
     <title>${title}</title>
-    <style>
-      ${css}
-    </style>
+    <link rel="stylesheet" href="/ui.css" />
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
@@ -49,7 +47,7 @@
             <span aria-hidden="true">≡</span>
             Library
           </a>
-          <a href="/profile" ${profile}>
+          <a href="/profile" aria-current="${profile}">
             <span aria-hidden="true">⚙</span>
             Profile
           </a>

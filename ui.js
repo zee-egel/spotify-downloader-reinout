@@ -3,7 +3,7 @@ function renderHTML(name, values = {}) {
   return uiTemplates[name].replace(/\$\{(\w+)\}/g, (_, key) => {
     if (!(key in values)) throw Error(`Missing ${key} in ${name}`);
     return String(values[key]);
-  });
+  }).replace(/ open="(true|false)"/g, (_, value) => value === "true" ? " open" : "");
 }
 const sourceIcon = (source) => renderHTML(
   source === "youtube" ? "source-youtube" : source === "soulseek" ? "source-soulseek" : "source-empty",
@@ -367,7 +367,7 @@ function renderRuns() {
               activity: esc(activity), description: esc(description),
               counts: counts.length && !finished ? renderHTML("run-counts", { counts: esc(counts.join(" · ")) }) : "",
               libraryLabel: complete ? "Get downloaded music" : "Open library",
-              open: !finished && i === 0 ? " open" : "",
+              open: !finished && i === 0,
               trackCount: total != null ? total + " " : "",
               tracks: trackRows || renderHTML("empty-tracks"),
               more: r.tracks.length > limit ? renderHTML("more-tracks", { key: esc(key) }) : "",

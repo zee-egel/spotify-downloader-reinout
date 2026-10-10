@@ -20,14 +20,14 @@
     />
     <input type="hidden" name="folder" value="${folder}" />
     <select id="file-sort" name="sort" aria-label="Sort files">
-      <option value="name" ${sort_name}>Name</option>
-      <option value="type" ${sort_type}>Type</option>
-      <option value="size" ${sort_size}>Size</option>
-      <option value="modified" ${sort_modified}>Modified</option>
+      <option value="name" selected="${sort_name}">Name</option>
+      <option value="type" selected="${sort_type}">Type</option>
+      <option value="size" selected="${sort_size}">Size</option>
+      <option value="modified" selected="${sort_modified}">Modified</option>
     </select>
     <select name="dir" aria-label="File sort direction">
-      <option value="asc" ${direction_asc}>Ascending</option>
-      <option value="desc" ${direction_desc}>Descending</option>
+      <option value="asc" selected="${direction_asc}">Ascending</option>
+      <option value="desc" selected="${direction_desc}">Descending</option>
     </select>
     <button type="submit">Sort</button>
   </form>

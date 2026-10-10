@@ -266,18 +266,13 @@ def library_view(folder='', sort='name', direction='asc', root=None):
         return {'html': None, 'error': 'This folder is unavailable. It may have moved or been removed.'}
 
 
-CSS = Path(__file__).with_name('ui.css').read_text()
-LIVE_JS = Path(__file__).with_name('ui.js').read_text()
-
-
 def page(body, title='Playlist desk'):
-    profile = 'aria-current="page"' if 'class="profile-page"' in body else ''
+    is_profile = 'class="profile-page"' in body
     return render_html(
         'base',
         title=html.escape(title),
-        css=CSS,
-        profile=profile,
-        connection_status='Personal settings' if profile else 'Connecting…',
+        profile='page' if is_profile else 'false',
+        connection_status='Personal settings' if is_profile else 'Connecting…',
         body=body,
         ui_templates=client_templates_json(),
     ).encode()
@@ -549,7 +544,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self.auth():
             return
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == '/profile':
+        if parsed.path in ('/ui.css', '/ui.js', '/profile.js'):
+            asset = Path(__file__).with_name(parsed.path[1:])
+            kind = 'text/css' if asset.suffix == '.css' else 'text/javascript'
+            self.send(asset.read_bytes(), kind=kind + '; charset=utf-8')
+        elif parsed.path == '/profile':
             self.send(page(profiles.settings_html(self.user, self.username)))
         elif parsed.path == '/spotify/callback':
             try:
@@ -789,17 +788,17 @@ class Handler(BaseHTTPRequestHandler):
             crumbs=''.join(crumbs),
             refresh_url=html.escape(self.path.split('#')[0], quote=True),
             folder=html.escape(folder, quote=True),
-            sort_name=' selected' if sort == 'name' else '',
-            sort_type=' selected' if sort == 'type' else '',
-            sort_size=' selected' if sort == 'size' else '',
-            sort_modified=' selected' if sort == 'modified' else '',
-            direction_asc=' selected' if direction == 'asc' else '',
-            direction_desc=' selected' if direction == 'desc' else '',
+            sort_name=sort == 'name',
+            sort_type=sort == 'type',
+            sort_size=sort == 'size',
+            sort_modified=sort == 'modified',
+            direction_asc=direction == 'asc',
+            direction_desc=direction == 'desc',
             files=library['html'] or '',
         )
         initial = json.dumps({'runs': [run_view(run, []) for run in runs], 'transfers': [], 'error': None, 'library': library}).replace('<', '\\u003c')
         body += render_html('initial-state', state=initial)
-        body += render_html('script', source=LIVE_JS)
+        body += render_html('script', source='/ui.js')
         self.send(page(body))
 
 if __name__ == '__main__':

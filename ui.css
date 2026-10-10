@@ -116,7 +116,7 @@ kbd { font: inherit; }
 .error { color: var(--danger); font-size: 14px; margin-top: 12px; line-height: 1.6; }
 .error:empty { display: none; }
 .progress { height: 6px; background: #dfe6ee; overflow: hidden; margin-top: 12px; border-radius: 3px; }
-.progress span { display: block; height: 100%; background: var(--accent); }
+.progress span { display: block; width: calc(var(--progress, 0) * 1%); height: 100%; background: var(--accent); }
 .progress.complete span { background: var(--success); }
 .run { padding: 26px 0; border-bottom: 1px solid var(--line); }
 .run-header { display: flex; align-items: center; gap: 18px; }

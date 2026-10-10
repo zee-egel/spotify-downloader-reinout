@@ -178,7 +178,7 @@ def settings_html(user, username):
     spotify = settings.get('spotify') or {}
     bot = settings.get('telegram') or {}
     esc = html.escape
-    profile_script = render_html('script', source=Path(__file__).with_name('profile.js').read_text())
+    profile_script = render_html('script', source='/profile.js')
     return render_html(
         'profile',
         avatar_initial=esc(username[:1].upper()),

@@ -1,4 +1,5 @@
 """HTML templates; callers retain the existing explicit escaping of user data."""
+import re
 from functools import lru_cache
 from pathlib import Path
 from string import Template
@@ -12,7 +13,9 @@ def template(name):
 
 
 def render_html(template_name, **values):
-    return template(template_name).substitute(values)
+    markup = template(template_name).substitute(values)
+    # Boolean attributes are true by presence, even when their value says "false".
+    return re.sub(r' selected="(True|False)"', lambda match: ' selected' if match[1] == 'True' else '', markup)
 
 
 @lru_cache(maxsize=1)
