@@ -510,19 +510,6 @@ const form = document.getElementById("import-form"),
   input = form.elements.url,
   feedback = document.getElementById("import-feedback"),
   submit = form.querySelector("button");
-function validPlaylist(value) {
-  if (/^spotify:playlist:[a-zA-Z0-9]{22}$/.test(value)) return true;
-  try {
-    const u = new URL(value);
-    return (
-      u.protocol === "https:" &&
-      ["open.spotify.com", "play.spotify.com"].includes(u.hostname) &&
-      /^\/playlist\/[a-zA-Z0-9]{22}\/?$/.test(u.pathname)
-    );
-  } catch {
-    return false;
-  }
-}
 input.addEventListener("input", () => {
   input.setCustomValidity("");
   feedback.textContent = "";
@@ -531,23 +518,11 @@ input.addEventListener("input", () => {
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (submit.disabled) return;
-  if (!validPlaylist(input.value.trim())) {
-    input.setCustomValidity(
-      "Plak een Spotify-playlistlink. Links naar albums en losse nummers worden niet ondersteund.",
-    );
-    feedback.className = "error";
-    feedback.textContent =
-      "Gebruik een Spotify-playlistlink of -URI. Links naar albums en losse nummers worden niet ondersteund.";
-    input.focus();
-    input.reportValidity();
-    input.setAttribute("aria-invalid", "true");
-    return;
-  }
   submit.disabled = true;
   submit.textContent = "Importeren…";
   form.setAttribute("aria-busy", "true");
   feedback.className = "hint";
-  feedback.textContent = "Playlist versturen…";
+  feedback.textContent = "Muzieklink versturen…";
   try {
     const response = await fetch("/submit", {
       method: "POST",
@@ -560,11 +535,11 @@ form.addEventListener("submit", async (e) => {
       );
       throw Error(
         doc.querySelector(".error")?.textContent ||
-          "De playlist kon niet worden geïmporteerd. Probeer het opnieuw.",
+          "De muzieklink kon niet worden geïmporteerd. Probeer het opnieuw.",
       );
     }
     feedback.textContent =
-      "Playlist ingediend. Volg de nummers hieronder bij je imports.";
+      "Import ingediend. Volg de voortgang hieronder bij je imports.";
     input.value = "";
   } catch (error) {
     feedback.className = "error";
