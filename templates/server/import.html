@@ -2,15 +2,15 @@
   <section class="import" id="start">
     <div class="import-intro">
       <h1>
-        Totally not pirating...
+        Je playlist, als bestanden.
         <br />
       </h1>
-      <p>(Arr...)</p>
+      <p>Importeer een Spotify-playlist en volg de downloads.</p>
     </div>
     <div class="import-desk">
-      <h2>Import a playlist</h2>
+      <h2>Playlist importeren</h2>
       <form method="post" action="/submit" id="import-form">
-        <label for="playlist-url">Spotify playlist link</label>
+        <label for="playlist-url">Link naar Spotify-playlist</label>
         <div class="field">
           <input
             id="playlist-url"
@@ -21,45 +21,45 @@
             spellcheck="false"
             required
           />
-          <button class="primary" type="submit">Import playlist</button>
+          <button class="primary" type="submit">Importeren</button>
         </div>
       </form>
       <div class="hint" id="import-hint">
-        Paste a playlist URL or Spotify URI.
+        Plak een playlistlink of Spotify-URI.
         <kbd>⌘ / Ctrl K</kbd>
       </div>
       <div id="import-feedback" role="status"></div>
     </div>
   </section>
-  <ol class="process-guide" aria-label="How playlist downloads work">
+  <ol class="process-guide" aria-label="Zo werkt het downloaden van playlists">
     <li>
       <span>1</span>
       <div>
-        <strong>Find your tracks</strong>
-        <p>Search Soulseek for each song. Crate digging, minus the dust.</p>
+        <strong>Nummers zoeken</strong>
+        <p>Zoek elk nummer op Soulseek.</p>
       </div>
     </li>
     <li>
       <span>2</span>
       <div>
-        <strong>Recover missing songs</strong>
-        <p>Try YouTube and check the audio. A B-side to the original plan.</p>
+        <strong>Verder zoeken</strong>
+        <p>Probeer ontbrekende nummers via YouTube en controleer de audio.</p>
       </div>
     </li>
     <li>
       <span>3</span>
       <div>
-        <strong>Build your library</strong>
-        <p>Get available files as they arrive. Shelf space sold separately.</p>
+        <strong>Bibliotheek vullen</strong>
+        <p>Download beschikbare bestanden zodra ze binnen zijn.</p>
       </div>
     </li>
   </ol>
   <section id="activity">
     <div class="sectionhead">
       <div>
-        <h2>Your imports</h2>
+        <h2>Je imports</h2>
         <p class="muted">
-          Follow each playlist from first search to final file.
+          Volg elke playlist van de eerste zoekopdracht tot het laatste bestand.
         </p>
       </div>
       <form
@@ -69,11 +69,11 @@
         action="/clear-history"
         onsubmit="
           return confirm(
-            'Clear import history? Downloaded files will be kept.',
+            'Importgeschiedenis wissen? Gedownloade bestanden blijven bewaard.',
           );
         "
       >
-        <button class="danger" type="submit">Clear history</button>
+        <button class="danger" type="submit">Geschiedenis wissen</button>
       </form>
     </div>
     <div class="list" id="run-list"></div>

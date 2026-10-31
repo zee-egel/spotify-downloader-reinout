@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import profiles
+from audio_metadata import spotify_metadata, tag_audio
 from views import render_html, client_templates_json
 
 ROOT = Path(os.environ.get('DOWNLOADS_ROOT', './downloads')).resolve()
@@ -42,7 +43,7 @@ def inside(relative, root=None):
     root = ROOT if root is None else root
     target = (root / relative).resolve()
     if not target.is_relative_to(root):
-        raise ValueError('Path outside downloads')
+        raise ValueError('Dit pad ligt buiten de downloadmap')
     return target
 
 
@@ -93,11 +94,11 @@ def transfer_kind(state, error=''):
 def transfer_snapshot():
     slskd = os.environ.get('SLSKD_URL', '').rstrip('/')
     if not slskd:
-        return [], 'Set SLSKD_URL to show transfers.'
+        return [], 'Stel SLSKD_URL in om downloads te tonen.'
     try:
         users = request_json(slskd + '/api/v0/transfers/downloads?includeRemoved=true', os.environ.get('SLSKD_API_KEY'))
     except (urllib.error.URLError, ValueError, TimeoutError) as error:
-        return [], 'slskd is unavailable right now.' if not isinstance(error, urllib.error.HTTPError) or error.code not in (401, 403) else 'slskd rejected the API key.'
+        return [], 'slskd is momenteel niet beschikbaar.' if not isinstance(error, urllib.error.HTTPError) or error.code not in (401, 403) else 'slskd heeft de API-sleutel geweigerd.'
     rows = []
     for user in users if isinstance(users, list) else []:
         for group in user.get('directories', []) if isinstance(user, dict) else []:
@@ -115,12 +116,93 @@ def transfer_snapshot():
                 state = str(raw_state if raw_state is not None else 'Unknown')
                 error = str(file.get('error') or file.get('failureReason') or '')
                 rows.append({'id': str(file.get('id') or ''), 'batchId': str(file.get('batchId') or ''),
-                    'name': str(file.get('filename') or 'Unknown file').replace('\\', '/').split('/')[-1],
+                    'name': str(file.get('filename') or 'Onbekend bestand').replace('\\', '/').split('/')[-1],
                     'filename': str(file.get('filename') or ''), 'folder': str(group.get('directory') or ''), 'username': str(user.get('username') or ''),
+                    'localFilename': str(file.get('localFilename') or ''),
                     'state': state, 'kind': transfer_kind(raw_state, error), 'error': error,
                     'size': size, 'done': done, 'speed': speed, 'percent': max(0, min(100, percent)),
                     'date': str(file.get('requestedAt') or file.get('queuedAt') or file.get('startedAt') or ''), 'order': len(rows)})
     return rows, None
+
+
+def tag_completed_downloads():
+    """Tag completed Soulseek selections without needing an open dashboard."""
+    with STATE_LOCK:
+        runs = read_runs()
+    if not any(run.get('spotifyMetadata') for run in runs):
+        return
+    transfers, error = transfer_snapshot()
+    if error:
+        return
+    for run in runs:
+        state = run.get('workflow') or {}
+        records = {}
+        for track in (state.get('tracks') or []) + (state.get('downloads') or []):
+            if track.get('spotifyId'):
+                records.setdefault(track['spotifyId'], {}).update(track)
+        owner = run.get('owner', 'owner')
+        root = ROOT if owner == 'owner' else ROOT / 'profiles' / owner
+        if owner not in ('owner', 'extra', 'extra2') or root.is_symlink() or (ROOT / 'profiles').is_symlink():
+            continue
+        for ident, track in records.items():
+            metadata = (run.get('spotifyMetadata') or {}).get(ident)
+            if not metadata or not track.get('username') or not track.get('filename') or track.get('youtubeStatus') == 'completed':
+                continue
+            selected = [f for f in transfers if f['kind'] == 'completed'
+                        and f['username'] == track['username'] and f['filename'] == track['filename']
+                        and (not track.get('batchId') or f['batchId'] == track['batchId'])
+                        and (not f['date'] or f['date'] >= run.get('submitted', ''))]
+            if len(selected) != 1:
+                continue
+            transfer = selected[0]
+            key = ident + ':' + (transfer['id'] or transfer['batchId'] or track['filename'])
+            previous = (run.get('tagging') or {}).get(key, {})
+            if previous.get('status') in ('tagged', 'skipped') or previous.get('attempts', 0) >= 3 or time.time() < previous.get('retryAt', 0):
+                continue
+            local = transfer['localFilename']
+            if local:
+                local_path = Path(local)
+                if local_path.is_absolute():
+                    try:
+                        relative = local_path.relative_to(Path(os.environ.get('SLSKD_DOWNLOADS_DIR', str(ROOT))))
+                    except ValueError:
+                        # Separate containers can expose the same volume at different paths.
+                        try:
+                            relative = local_path.relative_to('/downloads')
+                        except ValueError:
+                            continue
+                    target = ROOT / relative
+                else:
+                    target = ROOT / local_path
+            else:
+                folder = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', state.get('playlistName') or run.get('name') or '').replace('..', '_').strip()
+                if not folder:
+                    continue
+                target = root / folder / track['filename'].replace('\\', '/').split('/')[-1]
+            if not target.resolve().is_relative_to(root.resolve()) or target.is_symlink() or not target.is_file():
+                continue
+            # A basename fallback cannot distinguish slskd's renamed duplicate files.
+            if not local and target.stat().st_size not in (transfer['size'], previous.get('fileSize')):
+                continue
+            _, result = tag_audio(target, metadata)
+            result.update(attempts=previous.get('attempts', 0) + 1, retryAt=time.time() + 60,
+                          filename=str(target.relative_to(ROOT)), fileSize=target.stat().st_size)
+            with STATE_LOCK:
+                current = read_runs()
+                match = next((r for r in current if r.get('submissionId') == run.get('submissionId') and r.get('submissionId')), None)
+                if match:
+                    match.setdefault('tagging', {})[key] = result
+                    save_runs(current)
+
+
+def metadata_worker():
+    while True:
+        try:
+            tag_completed_downloads()
+        except Exception:
+            import logging
+            logging.exception('Completed-download metadata scan failed')
+        time.sleep(10)
 
 
 def run_view(run, transfers):
@@ -232,7 +314,7 @@ def library_view(folder='', sort='name', direction='asc', root=None):
     try:
         directory = inside(folder, root)
         if not directory.is_dir():
-            raise ValueError('Folder not found')
+            raise ValueError('Map niet gevonden')
         items = sorted((p for p in directory.iterdir() if p.resolve().is_relative_to(root) and not p.is_symlink()), key=lambda p: file_sort_key(p, sort), reverse=direction == 'desc')
         rows = []
         for item in items:
@@ -264,7 +346,7 @@ def library_view(folder='', sort='name', direction='asc', root=None):
                 ))
         return {'html': ''.join(rows) or render_html('library-empty'), 'error': None}
     except (ValueError, OSError):
-        return {'html': None, 'error': 'This folder is unavailable. It may have moved or been removed.'}
+        return {'html': None, 'error': 'Deze map is niet beschikbaar. Hij is mogelijk verplaatst of verwijderd.'}
 
 
 def page(body, title='The Disc Situation'):
@@ -273,7 +355,7 @@ def page(body, title='The Disc Situation'):
         'base',
         title=html.escape(title),
         profile='page' if is_profile else 'false',
-        connection_status='Personal settings' if is_profile else 'Connecting…',
+        connection_status='Persoonlijke instellingen' if is_profile else 'Verbinden…',
         body=body,
         ui_templates=client_templates_json(),
     ).encode()
@@ -290,9 +372,9 @@ class Handler(BaseHTTPRequestHandler):
     def download_root(self):
         if self.user == 'owner':
             return ROOT
-        target = ROOT / 'profiles' / 'extra'
+        target = ROOT / 'profiles' / self.user
         if (ROOT / 'profiles').is_symlink() or target.is_symlink():
-            raise ValueError('Profile downloads directory is unavailable')
+            raise ValueError('De downloadmap van dit profiel is niet beschikbaar')
         target.mkdir(parents=True, exist_ok=True)
         return target
 
@@ -333,7 +415,7 @@ class Handler(BaseHTTPRequestHandler):
             profiles.save_telegram(self.user, form.get('token', [''])[0], form.get('chat', [''])[0].strip())
         elif self.path == '/profile/telegram-test':
             settings = profiles.load(self.user).get('telegram') or {}
-            profiles.telegram(self.user, 'sendMessage', {'chat_id': settings.get('chat'), 'text': 'Your bot is connected to The Disc Situation.'})
+            profiles.telegram(self.user, 'sendMessage', {'chat_id': settings.get('chat'), 'text': 'Je bot is gekoppeld aan The Disc Situation.'})
         elif self.path == '/profile/telegram-disconnect':
             profiles.update(self.user, telegram=None)
         self.redirect('/profile')
@@ -372,10 +454,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             accounts = profiles.accounts()
         except ValueError:
-            self.send_error(503, 'Account names must differ')
+            self.send_error(503, 'Accountnamen moeten verschillen')
             return False
         if not os.environ.get('APP_PASSWORD'):
-            self.send_error(503, 'Set APP_PASSWORD before serving the app')
+            self.send_error(503, 'Stel APP_PASSWORD in voordat je de app start')
             return False
         header = self.headers.get('Authorization', '')
         try:
@@ -421,13 +503,13 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get('Origin')
         host = self.headers.get('Host', '')
         if (origin and urllib.parse.urlparse(origin).netloc != host) or (self.path != '/submit' and not origin):
-            self.send_error(403, 'Invalid origin')
+            self.send_error(403, 'Ongeldige herkomst')
             return
         try:
             submission_id = None
             length = int(self.headers.get('Content-Length', '0'))
             if not 0 <= length <= 4096:
-                raise ValueError('Input too large')
+                raise ValueError('Invoer te groot')
             form = urllib.parse.parse_qs(self.rfile.read(length).decode())
             if self.path.startswith(('/profile/', '/spotify/')):
                 self.profile_action(form)
@@ -448,20 +530,20 @@ class Handler(BaseHTTPRequestHandler):
                 parts = Path(relative)
                 target = inside(relative, self.download_root())
                 if not relative or parts.is_absolute() or '..' in parts.parts or target == self.download_root() or target == ROOT / 'profiles':
-                    raise ValueError('Invalid delete path')
+                    raise ValueError('Ongeldig pad om te verwijderen')
                 check = self.download_root()
                 for part in parts.parts:
                     check /= part
                     if check.is_symlink():
-                        raise ValueError('Symlinks cannot be deleted here')
+                        raise ValueError('Symbolische links kunnen hier niet worden verwijderd')
                 if target.is_dir():
                     if not shutil.rmtree.avoids_symlink_attacks:
-                        raise ValueError('Safe folder deletion is unavailable')
+                        raise ValueError('Veilig verwijderen van mappen is niet beschikbaar')
                     shutil.rmtree(target)
                 elif target.is_file():
                     target.unlink()
                 else:
-                    raise ValueError('File or folder not found')
+                    raise ValueError('Bestand of map niet gevonden')
                 parent = str(parts.parent)
                 self.send_response(303)
                 self.send_header('Location', '/?folder=' + urllib.parse.quote('' if parent == '.' else parent) + '#files')
@@ -470,10 +552,10 @@ class Handler(BaseHTTPRequestHandler):
             url = form.get('url', [''])[0].strip()
             ident = playlist_id(url)
             if not ident:
-                raise ValueError('Enter a Spotify playlist URL or URI')
+                raise ValueError('Vul een Spotify-playlistlink of -URI in')
             webhook = os.environ.get('N8N_WEBHOOK_URL', '')
             if not webhook:
-                raise ValueError('The download service is not configured yet.')
+                raise ValueError('De downloaddienst is nog niet ingesteld.')
             headers = {'Content-Type': 'application/json'}
             if os.environ.get('N8N_WEBHOOK_TOKEN'):
                 headers['X-Webhook-Token'] = os.environ['N8N_WEBHOOK_TOKEN']
@@ -485,19 +567,19 @@ class Handler(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 runs = read_runs()
                 # ponytail: one app replica and a five-minute callback lease; use a durable queue for multiple replicas.
-                if os.environ.get('EXTRA_APP_USER') and any(
+                if len(profiles.accounts()) > 1 and any(
                     run.get('status') in ('submitting', 'submitted', 'unconfirmed')
                     and ((run.get('workflow') or {}).get('resolving') or not run.get('workflow'))
                     and time.time() - datetime.fromisoformat(run.get('updated') or run['submitted']).timestamp() < 300
                     for run in runs):
-                    raise ValueError('Another playlist is being resolved. Try again after it finishes queueing.')
-                runs.insert(0, {'id': ident, 'submissionId': submission_id, 'name': 'Spotify playlist ' + ident, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitting', 'owner': self.user})
+                    raise ValueError('Er wordt al een andere playlist uitgelezen. Probeer het opnieuw zodra die in de wachtrij staat.')
+                runs.insert(0, {'id': ident, 'submissionId': submission_id, 'name': 'Spotify-playlist ' + ident, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitting', 'owner': self.user, 'spotifyMetadata': spotify_metadata(items)})
                 save_runs(runs)
-            req = urllib.request.Request(webhook, json.dumps({'url': url, 'playlistId': ident, 'submissionId': submission_id, 'profileId': self.user, 'downloadDirectory': '' if self.user == 'owner' else 'profiles/extra', 'playlist': playlist, 'playlistItems': items}).encode(), headers)
+            req = urllib.request.Request(webhook, json.dumps({'url': url, 'playlistId': ident, 'submissionId': submission_id, 'profileId': self.user, 'downloadDirectory': '' if self.user == 'owner' else 'profiles/' + self.user, 'playlist': playlist, 'playlistItems': items}).encode(), headers)
             try:
                 with urllib.request.urlopen(req, timeout=15) as response:
                     if response.status >= 300:
-                        raise ValueError('Workflow rejected submission')
+                        raise ValueError('De workflow heeft de import geweigerd')
             except (urllib.error.URLError, TimeoutError) as error:
                 # Keep uncertain submissions: the workflow may already be running.
                 with STATE_LOCK:
@@ -510,7 +592,7 @@ class Handler(BaseHTTPRequestHandler):
                                 run['status'] = 'unconfirmed'
                     save_runs(runs)
                 raise
-            name = (playlist or {}).get('name') or playlist_name(ident) or 'Spotify playlist ' + ident
+            name = (playlist or {}).get('name') or playlist_name(ident) or 'Spotify-playlist ' + ident
             with STATE_LOCK:
                 runs = read_runs()
                 for run in runs:
@@ -525,10 +607,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(page(render_html('service-error')), status=502)
                 return
             self.log_error('n8n webhook returned HTTP %d', error.code)
-            message = 'n8n rejected the webhook credentials (403); check N8N_WEBHOOK_TOKEN' if error.code == 403 else f'n8n webhook returned HTTP {error.code}; check N8N_WEBHOOK_URL'
+            message = 'n8n heeft de webhook-inloggegevens geweigerd (403); controleer N8N_WEBHOOK_TOKEN' if error.code == 403 else f'De n8n-webhook gaf HTTP {error.code} terug; controleer N8N_WEBHOOK_URL'
             self.send(page(render_html('submit-error', details=html.escape(message))), status=502)
         except (ValueError, urllib.error.URLError, TimeoutError) as error:
-            message = 'Connection lost. Check recent imports before submitting again.' if isinstance(error, (urllib.error.URLError, TimeoutError)) else str(error)
+            message = 'Verbinding verbroken. Controleer je recente imports voordat je de playlist opnieuw indient.' if isinstance(error, (urllib.error.URLError, TimeoutError)) else str(error)
             self.send(page(render_html('error-page', message=html.escape(message))), status=400)
         except OSError as error:
             self.log_error('file operation failed: %s', error)
@@ -582,9 +664,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Invalid request size')
             payload = json.loads(self.rfile.read(length))
             from youtube_fallback import main, validate
-            if not isinstance(payload, dict) or payload.get('profileId', 'owner') not in ('owner', 'extra'):
+            if not isinstance(payload, dict) or payload.get('profileId', 'owner') not in ('owner', 'extra', 'extra2'):
                 raise ValueError('Invalid profile')
             validate(payload.get('track'))
+            with STATE_LOCK:
+                run = next((r for r in read_runs() if r.get('submissionId') == payload.get('submissionId')
+                            and r.get('submissionId') and r.get('owner', 'owner') == payload.get('profileId', 'owner')), None)
+                if run:
+                    payload['track'].update((run.get('spotifyMetadata') or {}).get(payload['track']['spotifyId'], {}))
         except (ValueError, TypeError, UnicodeError):
             self.send(b'{"status":"failed","reason":"Invalid YouTube request"}', kind='application/json', status=400)
             return
@@ -603,7 +690,7 @@ class Handler(BaseHTTPRequestHandler):
             last_update[:] = [now, update['status']]
         # ponytail: one download at a time; move to a durable worker if more accounts need it.
         if not YOUTUBE_LOCK.acquire(blocking=False):
-            report(status='youtube waiting', percent=None, reason='Waiting for the active YouTube download. Recovery will retry shortly.', source='YouTube')
+            report(status='youtube waiting', percent=None, reason='Wachten op de actieve YouTube-download. Het zoeken wordt binnenkort opnieuw geprobeerd.', source='YouTube')
             self.send(b'{"status":"failed","reason":"YouTube downloader busy; waiting to retry","retryable":true,"retryAfterSeconds":60}', kind='application/json', status=409)
             return
         try:
@@ -619,13 +706,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             relative = urllib.parse.parse_qs(parsed.query).get('path', [''])[0]
             if not relative:
-                raise ValueError('Missing path')
+                raise ValueError('Pad ontbreekt')
             target = inside(relative, self.download_root())
             if not target.exists():
                 raise FileNotFoundError(relative)
             if parsed.path == '/file':
                 if not target.is_file():
-                    raise ValueError('Not a file')
+                    raise ValueError('Dit is geen bestand')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/octet-stream')
                 self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + urllib.parse.quote(target.name))
@@ -637,7 +724,7 @@ class Handler(BaseHTTPRequestHandler):
                         self.wfile.write(chunk)
             else:
                 if not target.is_dir():
-                    raise ValueError('Not a folder')
+                    raise ValueError('Dit is geen map')
                 # ponytail: temporary disk space buys an exact size for native browser progress.
                 with tempfile.TemporaryFile() as source:
                     try:
@@ -650,7 +737,7 @@ class Handler(BaseHTTPRequestHandler):
                                     if file.is_file() and file.resolve().is_relative_to(self.download_root()):
                                         archive.write(file, file.relative_to(target))
                     except OSError:
-                        self.send_error(503, 'ZIP could not be prepared. Please try again later.')
+                        self.send_error(503, 'Het ZIP-bestand kon niet worden gemaakt. Probeer het later opnieuw.')
                         return
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/zip')
@@ -684,11 +771,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(track, dict) or not isinstance(track.get('spotifyId'), str) or not track['spotifyId']:
                     raise ValueError('Invalid track update')
                 result = {}
-                for key in ('spotifyId', 'spotifyUrl', 'artist', 'title', 'status', 'username', 'filename', 'batchId', 'reason', 'youtubeStatus', 'fallbackSource'):
+                for key in ('spotifyId', 'spotifyUrl', 'artist', 'title', 'status', 'username', 'filename', 'batchId', 'reason', 'youtubeStatus', 'fallbackSource', 'album', 'albumArtist', 'releaseDate', 'coverUrl'):
                     if key in track:
                         if track[key] is not None and not isinstance(track[key], str):
                             raise ValueError('Invalid track field')
                         result[key] = track[key] or ''
+                for key in ('trackNumber', 'discNumber'):
+                    if key in track:
+                        if track[key] is not None and (type(track[key]) is not int or track[key] < 1):
+                            raise ValueError('Invalid track number')
+                        result[key] = track[key]
                 for key in ('youtubeAttempted', 'fallbackAttempted'):
                     if key in track:
                         result[key] = bool(track[key])
@@ -705,6 +797,10 @@ class Handler(BaseHTTPRequestHandler):
                 runs = read_runs()
                 run = next((item for item in runs if item.get('id') == ident and item.get('submissionId') == payload.get('submissionId') and item.get('submissionId')), None)
                 if run:
+                    for track in clean.get('tracks', []) + ([track_update] if track_update else []):
+                        if track.get('coverUrl') or track.get('album'):
+                            metadata = {key: track[key] for key in ('title', 'artist', 'album', 'albumArtist', 'releaseDate', 'coverUrl', 'trackNumber', 'discNumber', 'spotifyUrl') if key in track}
+                            run.setdefault('spotifyMetadata', {}).setdefault(track['spotifyId'], metadata)
                     phases = {'queued': 0, 'progress': 1, 'final': 2}
                     previous = run.get('workflow') or {}
                     if phases[clean['phase']] >= phases.get(previous.get('phase'), -1) and (clean.get('fallbackAttempts', previous.get('fallbackAttempts')) or 0) >= (previous.get('fallbackAttempts') or 0):
@@ -730,7 +826,7 @@ class Handler(BaseHTTPRequestHandler):
         rows = []
         for file in transfers[:80]:
             label = html.escape(file['name'])
-            detail = f"{size_label(file['done'])} of {size_label(file['size'])}"
+            detail = f"{size_label(file['done'])} van {size_label(file['size'])}"
             if file['speed']:
                 detail += f" · {size_label(file['speed'])}/s"
             rows.append(render_html(
@@ -786,7 +882,7 @@ class Handler(BaseHTTPRequestHandler):
                 part=html.escape(part),
             ))
         runs = self.runs()[:8]
-        missing = {(run['id'], run['submitted']): playlist_name(run['id']) or 'Spotify playlist ' + run['id'] for run in runs if not run.get('name')}
+        missing = {(run['id'], run['submitted']): playlist_name(run['id']) or 'Spotify-playlist ' + run['id'] for run in runs if not run.get('name')}
         if missing:
             with STATE_LOCK:
                 saved = read_runs()
@@ -820,4 +916,5 @@ if __name__ == '__main__':
     assert playlist_id('spotify:playlist:37i9dQZF1DXcBWIGoYBM5M') == '37i9dQZF1DXcBWIGoYBM5M'
     assert playlist_id('https://evil.example/playlist/37i9dQZF1DXcBWIGoYBM5M') is None
     ROOT.mkdir(parents=True, exist_ok=True)
+    threading.Thread(target=metadata_worker, daemon=True, name='audio-metadata').start()
     ThreadingHTTPServer(('0.0.0.0', PORT), Handler).serve_forever()

@@ -216,7 +216,7 @@ summary:hover { text-decoration: underline; text-underline-offset: 4px; }
   .run-title { font-size: 18px; }
   .controls { gap: 8px; }
   .controls input[type="search"] { max-width: none; }
-  .controls select { flex: 1; }
+  .controls select { flex: 1; min-width: 180px; }
   .row.library-row { flex-wrap: wrap; gap: 12px; }
   .library-row > div:first-child { width: 100%; }
   .right { margin-left: 56px; flex-wrap: wrap; }

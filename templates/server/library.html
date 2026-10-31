@@ -1,44 +1,43 @@
 <section data-view="files" id="files">
   <div class="sectionhead">
     <div>
-      <h1>Library</h1>
+      <h1>Bibliotheek</h1>
       <p class="muted">
-        Ready to listen. Download individual files or a whole folder. Hoarding,
-        but with rhythm.
+        Klaar om te luisteren. Download losse bestanden of een hele map.
       </p>
       <div class="crumbs">${crumbs}</div>
     </div>
-    <a class="link" href="${refresh_url}#files">Refresh</a>
+    <a class="link" href="${refresh_url}#files">Vernieuwen</a>
   </div>
   <form class="controls" method="get" action="/#files">
     <input
       id="library-search"
       type="search"
       autocomplete="off"
-      placeholder="Search this folder…"
-      aria-label="Search this folder"
+      placeholder="Deze map doorzoeken…"
+      aria-label="Deze map doorzoeken"
     />
     <input type="hidden" name="folder" value="${folder}" />
-    <select id="file-sort" name="sort" aria-label="Sort files">
-      <option value="name" selected="${sort_name}">Name</option>
+    <select id="file-sort" name="sort" aria-label="Bestanden sorteren">
+      <option value="name" selected="${sort_name}">Naam</option>
       <option value="type" selected="${sort_type}">Type</option>
-      <option value="size" selected="${sort_size}">Size</option>
-      <option value="modified" selected="${sort_modified}">Modified</option>
+      <option value="size" selected="${sort_size}">Grootte</option>
+      <option value="modified" selected="${sort_modified}">Gewijzigd</option>
     </select>
-    <select name="dir" aria-label="File sort direction">
-      <option value="asc" selected="${direction_asc}">Ascending</option>
-      <option value="desc" selected="${direction_desc}">Descending</option>
+    <select name="dir" aria-label="Sorteerrichting bestanden">
+      <option value="asc" selected="${direction_asc}">Oplopend</option>
+      <option value="desc" selected="${direction_desc}">Aflopend</option>
     </select>
-    <button type="submit">Sort</button>
+    <button type="submit">Sorteren</button>
   </form>
   <div class="list" id="library-list">${files}</div>
   <details class="section library-activity" id="library-activity">
-    <summary>Transfers in this session</summary>
+    <summary>Downloads in deze sessie</summary>
     <div id="library-transfers" class="list"></div>
-    <button type="button" id="more-library-transfers" hidden>Show more</button>
+    <button type="button" id="more-library-transfers" hidden>Meer tonen</button>
   </details>
   <p id="library-error" class="error" role="status"></p>
   <p id="library-no-match" class="empty" hidden>
-    No files match your search. Even the B-sides came up empty.
+    Geen bestanden gevonden voor je zoekopdracht.
   </p>
 </section>

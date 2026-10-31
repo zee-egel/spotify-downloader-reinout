@@ -1,4 +1,4 @@
-"""Two Basic-auth accounts and their private integrations; SQLite is in the state volume."""
+"""Basic-auth accounts and their private integrations; SQLite is in the state volume."""
 import base64
 import hashlib
 import html
@@ -50,12 +50,14 @@ def update(user, **values):
 
 def accounts():
     owner = os.environ.get('APP_USER', 'admin')
-    extra = os.environ.get('EXTRA_APP_USER', '')
-    if extra and extra == owner:
-        raise ValueError('The two account names must differ')
     result = {owner: ('owner', os.environ.get('APP_PASSWORD', ''))}
-    if extra and os.environ.get('EXTRA_APP_PASSWORD'):
-        result[extra] = ('extra', os.environ['EXTRA_APP_PASSWORD'])
+    for suffix, profile in (('', 'extra'), ('_2', 'extra2')):
+        username = os.environ.get('EXTRA_APP_USER' + suffix, '')
+        password = os.environ.get('EXTRA_APP_PASSWORD' + suffix, '')
+        if username and username in result:
+            raise ValueError('Accountnamen moeten verschillen')
+        if username and password:
+            result[username] = (profile, password)
     return result
 
 
@@ -69,14 +71,14 @@ def redirect_uri():
     base = os.environ.get('APP_PUBLIC_URL', '').rstrip('/')
     parsed = urllib.parse.urlsplit(base)
     if parsed.scheme != 'https' or not parsed.netloc or parsed.query or parsed.fragment or parsed.username:
-        raise ValueError('Set APP_PUBLIC_URL to the HTTPS address of this app')
+        raise ValueError('Stel APP_PUBLIC_URL in op het HTTPS-adres van deze app')
     return base + '/spotify/callback'
 
 
 def spotify_start(user):
     client = os.environ.get('SPOTIFY_CLIENT_ID', '')
     if not client:
-        raise ValueError('Spotify linking has not been configured yet')
+        raise ValueError('De Spotify-koppeling is nog niet ingesteld')
     verifier = secrets.token_urlsafe(48)
     state = secrets.token_urlsafe(32)
     update(user, oauth={'state': state, 'verifier': verifier, 'expires': time.time() + 600})
@@ -100,10 +102,10 @@ def spotify_finish(user, query):
         pending = load(user).get('oauth') or {}
         state = query.get('state', [''])[0]
         if not state or not hmac.compare_digest(state, pending.get('state', '')) or pending.get('expires', 0) < time.time():
-            raise ValueError('Spotify login expired or does not belong to this account. Try connecting again.')
+            raise ValueError('De Spotify-aanmelding is verlopen of hoort niet bij dit account. Probeer opnieuw te koppelen.')
         update(user, oauth=None)
     if query.get('error') or not query.get('code'):
-        raise ValueError('Spotify connection was canceled')
+        raise ValueError('De Spotify-koppeling is geannuleerd')
     tokens = spotify_tokens({'grant_type': 'authorization_code', 'code': query['code'][0],
                              'redirect_uri': redirect_uri(), 'code_verifier': pending['verifier']})
     me = json_request('https://api.spotify.com/v1/me', headers={'Authorization': 'Bearer ' + tokens['access_token']})
@@ -113,11 +115,11 @@ def spotify_finish(user, query):
 
 def spotify_get(user, path):
     if not path.startswith('/v1/'):
-        raise ValueError('Invalid Spotify path')
+        raise ValueError('Ongeldig Spotify-pad')
     with LOCK:
         tokens = load(user).get('spotify')
         if not tokens:
-            raise ValueError('Connect your Spotify account in Profile before importing')
+            raise ValueError('Koppel je Spotify-account bij Profiel voordat je importeert')
         if tokens.get('expires', 0) < time.time() + 60:
             fresh = spotify_tokens({'grant_type': 'refresh_token', 'refresh_token': tokens['refresh_token']})
             tokens = {**tokens, **fresh, 'expires': time.time() + fresh['expires_in']}
@@ -134,16 +136,16 @@ def spotify_playlist(user, ident):
         if not page.get('next'):
             break
         if not page['items']:
-            raise ValueError('Spotify returned an incomplete playlist')
+            raise ValueError('Spotify heeft een onvolledige playlist teruggegeven')
         offset += len(page['items'])
-    return {'id': ident, 'name': playlist.get('name', 'Spotify playlist')}, {'items': items, 'next': None}
+    return {'id': ident, 'name': playlist.get('name', 'Spotify-playlist')}, {'items': items, 'next': None}
 
 
 def telegram(user, method, payload=None):
     settings = load(user).get('telegram') or {}
     token = settings.get('token', '')
     if not re_token(token):
-        raise ValueError('Add your Telegram bot in Profile first')
+        raise ValueError('Voeg eerst je Telegram-bot toe bij Profiel')
     return telegram_request(token, method, payload)
 
 
@@ -156,7 +158,7 @@ def telegram_request(token, method, payload=None):
     result = json_request('https://api.telegram.org/bot' + token + '/' + method,
         headers={'Content-Type': 'application/json'}, data=json.dumps(payload or {}).encode())
     if not result.get('ok'):
-        raise ValueError('Telegram rejected the request')
+        raise ValueError('Telegram heeft het verzoek geweigerd')
     return result['result']
 
 
@@ -165,12 +167,12 @@ def save_telegram(user, token, chat):
     current = load(user).get('telegram') or {}
     token = token.strip() or current.get('token', '')
     if not re_token(token) or not re.fullmatch(r'-?[0-9]+', chat):
-        raise ValueError('Enter a valid bot token and numeric Telegram chat ID')
+        raise ValueError('Vul een geldig bottoken en een numeriek Telegram-chat-ID in')
     bot = telegram_request(token, 'getMe')
     destination = telegram_request(token, 'getChat', {'chat_id': chat})
     if str(destination['id']) != str(int(chat)):
-        raise ValueError('Telegram chat could not be verified')
-    update(user, telegram={'token': token, 'chat': chat, 'name': bot.get('username', 'Telegram bot')})
+        raise ValueError('De Telegram-chat kon niet worden geverifieerd')
+    update(user, telegram={'token': token, 'chat': chat, 'name': bot.get('username', 'Telegram-bot')})
 
 
 def settings_html(user, username):
@@ -184,15 +186,15 @@ def settings_html(user, username):
         avatar_initial=esc(username[:1].upper()),
         username=esc(username),
         spotify_kind='success' if spotify else '',
-        spotify_status='Connected' if spotify else 'Not connected',
+        spotify_status='Verbonden' if spotify else 'Niet verbonden',
         spotify_name=esc(spotify.get('name', '')),
-        spotify_button='Reconnect Spotify' if spotify else 'Connect Spotify',
+        spotify_button='Spotify opnieuw koppelen' if spotify else 'Spotify koppelen',
         spotify_disconnect=render_html('spotify-disconnect') if spotify else '',
         telegram_kind='success' if bot else '',
-        telegram_status='Connected' if bot else 'Not connected',
+        telegram_status='Verbonden' if bot else 'Niet verbonden',
         telegram_name=esc(bot.get('name', '')),
-        token_placeholder='Leave blank to keep your token…' if bot else 'Paste your BotFather token…',
-        token_hint='Your saved token is kept private. Leave this blank to keep it.' if bot else 'Your token is saved privately and never displayed. Backstage passes stay backstage.',
+        token_placeholder='Laat leeg om je token te behouden…' if bot else 'Plak je BotFather-token…',
+        token_hint='Je opgeslagen token blijft privé. Laat dit veld leeg om het te behouden.' if bot else 'Je token wordt privé opgeslagen en niet weergegeven.',
         chat_id=esc(bot.get('chat', ''), quote=True),
         telegram_actions=render_html('telegram-actions') if bot else '',
         profile_script=profile_script,

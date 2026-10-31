@@ -17,18 +17,18 @@ def patch(workflow):
         node.update(type='n8n-nodes-base.code', typeVersion=2)
         node.pop('credentials', None)
         node['parameters'] = {'jsCode': "const body = $('Playlist desk webhook').first().json.body;\n"
-            "if (!['owner', 'extra'].includes(body.profileId)) throw new Error('Unknown profile');\n"
-            "const expected = body.profileId === 'extra' ? 'profiles/extra' : '';\n"
+            "if (!['owner', 'extra', 'extra2'].includes(body.profileId)) throw new Error('Unknown profile');\n"
+            "const expected = body.profileId === 'owner' ? '' : 'profiles/' + body.profileId;\n"
             "if (body.downloadDirectory !== expected) throw new Error('Invalid profile destination');\n"
             f"if (!body.{value}) throw new Error('Connect Spotify in Playlist desk before importing');\n"
             f"return [{{ json: body.{value} }}];"}
     for name in ('Queue Download', 'Queue Fallback'):
         params = nodes[name]['parameters']
         previous = 'destination: $json.playlistName'
-        if previous not in params['jsonBody']:
-            raise ValueError('Unrecognized destination or already patched: ' + name)
-        params['jsonBody'] = params['jsonBody'].replace(previous,
-            "destination: [$('Playlist desk webhook').first().json.body.downloadDirectory, $json.playlistName].filter(Boolean).join('/')")
+        destination = "destination: [$('Playlist desk webhook').first().json.body.downloadDirectory, $json.playlistName].filter(Boolean).join('/')"
+        if previous not in params['jsonBody'] and destination not in params['jsonBody']:
+            raise ValueError('Unrecognized destination: ' + name)
+        params['jsonBody'] = params['jsonBody'].replace(previous, destination)
     message_texts = ('={{ $json.message }}', "={{ $json.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}")
     for node in workflow['nodes']:
         is_notification = node['name'] in ('Send a text message', 'Send Queue Summary', 'Send Remote Pending') or node.get('type') == 'n8n-nodes-base.telegram'

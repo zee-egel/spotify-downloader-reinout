@@ -1,15 +1,14 @@
 <section class="profile-page">
   <div class="page-heading">
-    <h1>Your connections</h1>
-    <p>Manage Spotify access and download notifications.</p>
+    <h1>Je koppelingen</h1>
+    <p>Beheer Spotify-toegang en downloadmeldingen.</p>
   </div>
   <div class="account-strip">
     <span class="account-avatar" aria-hidden="true">${avatar_initial}</span>
     <div>
       <strong>${username}</strong>
       <p class="muted">
-        Your imports, files, and connections belong to this profile. Your guilty
-        pleasures stay yours.
+        Je imports, bestanden en koppelingen horen bij dit profiel.
       </p>
     </div>
   </div>
@@ -17,9 +16,8 @@
     <div>
       <h2>Spotify</h2>
       <p>
-        Connect your account to import playlists, including your private
-        collections. <br />(spotify decided to be annoying and disabled
-        importing playlists from users other than yourself, dw it's safe)
+        Koppel je account om je eigen playlists te importeren, ook privéplaylists.
+        Spotify beperkt de toegang tot playlists van andere gebruikers.
       </p>
     </div>
     <div class="settings-content">
@@ -39,12 +37,11 @@
     <div>
       <h2>Telegram</h2>
       <p>
-        Get playlist updates in your own chat. Like a roadie, but less likely to
-        lose your number.
+        Ontvang updates over je playlists in je eigen Telegram-chat.
       </p>
       <p class="muted">
-        Create a bot with @BotFather, then start a chat with your bot before
-        connecting it here.
+        Maak een bot via @BotFather en start een chat met je bot voordat
+        je hem hier koppelt.
       </p>
     </div>
     <div class="settings-content">
@@ -53,7 +50,7 @@
         ${telegram_name}
       </p>
       <form method="post" action="/profile/telegram" class="settings-form">
-        <label for="bot-token">Bot token</label>
+        <label for="bot-token">Bottoken</label>
         <input
           id="bot-token"
           type="password"
@@ -64,7 +61,7 @@
           placeholder="${token_placeholder}"
         />
         <p class="hint" id="token-hint">${token_hint}</p>
-        <label for="chat-id">Chat ID</label>
+        <label for="chat-id">Chat-ID</label>
         <input
           id="chat-id"
           name="chat"
@@ -74,7 +71,7 @@
           value="${chat_id}"
           required
         />
-        <button class="primary">Save bot</button>
+        <button class="primary">Bot opslaan</button>
       </form>
       ${telegram_actions}
     </div>

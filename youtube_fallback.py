@@ -83,14 +83,14 @@ def failure_code(error):
 
 
 FAILURE_REASONS = {
-    'timeout': 'YouTube recovery reached its time limit; try again later.',
-    'youtube_challenge': 'YouTube requires a sign-in or bot check on the download host.',
-    'rate_limited': 'YouTube rate-limited the download host; try again later.',
-    'access_denied': 'YouTube denied audio access; check the host’s yt-dlp version and JavaScript runtime.',
-    'missing_runtime': 'The download host needs yt-dlp, yt-dlp-ejs, Node and ffprobe.',
-    'video_unavailable': 'Matching YouTube videos are unavailable on the download host.',
-    'extraction_failed': 'Matching YouTube candidates could not be extracted.',
-    'audio_validation_failed': 'Downloaded candidates did not contain complete, readable audio.',
+    'timeout': 'Het zoeken via YouTube heeft de tijdslimiet bereikt. Probeer het later opnieuw.',
+    'youtube_challenge': 'YouTube vereist een aanmelding of botcontrole op de downloadserver.',
+    'rate_limited': 'YouTube beperkt het aantal verzoeken van de downloadserver. Probeer het later opnieuw.',
+    'access_denied': 'YouTube heeft toegang tot de audio geweigerd. Controleer de yt-dlp-versie en JavaScript-runtime op de server.',
+    'missing_runtime': 'De downloadserver heeft yt-dlp, yt-dlp-ejs, Node en ffprobe nodig.',
+    'video_unavailable': 'Passende YouTube-video’s zijn niet beschikbaar op de downloadserver.',
+    'extraction_failed': 'De audio van passende YouTube-resultaten kon niet worden opgehaald.',
+    'audio_validation_failed': 'De downloads bevatten geen volledige, leesbare audio.',
 }
 
 
@@ -235,7 +235,7 @@ def download(job, request, progress=None):
             except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError) as error:
                 if stage == 'save':
                     note(stage, 'storage_failed', ident)
-                    return {'status': 'failed', 'code': 'storage_failed', 'reason': 'Validated audio could not be saved; check download storage and permissions.', 'diagnostics': diagnostics}
+                    return {'status': 'failed', 'code': 'storage_failed', 'reason': 'De gecontroleerde audio kon niet worden opgeslagen. Controleer de opslagruimte en toegangsrechten van de downloadmap.', 'diagnostics': diagnostics}
                 code = failure_code(error)
                 if stage == 'validation' and code == 'extraction_failed':
                     code = 'audio_validation_failed'
@@ -249,7 +249,7 @@ def download(job, request, progress=None):
     if failures:
         code = Counter(failures).most_common(1)[0][0]
         return {'status': 'failed', 'reason': FAILURE_REASONS[code], 'code': code, 'diagnostics': diagnostics}
-    return {'status': 'no_match', 'reason': 'No YouTube result matched artist, recording version and duration.',
+    return {'status': 'no_match', 'reason': 'Geen YouTube-resultaat kwam overeen met de artiest, de versie en de speelduur.',
             'code': 'no_matching_recording', 'diagnostics': diagnostics}
 
 
@@ -272,12 +272,20 @@ def save_audio(request, track, audio, downloaded, url, duration):
                 shutil.copyfileobj(source, staging)
             staging.flush()
             os.fsync(staging.fileno())
+            # Tag while staged; publish only the finished file to Library.
+            from audio_metadata import tag_audio
+            # FFmpeg detects the input container, but needs its suffix for the output.
+            audio_stage = staging_path.with_suffix(audio.suffix)
+            staging_path.replace(audio_stage)
+            staging_path = audio_stage
+            staging_path, tagging = tag_audio(staging_path, track, downloaded.get('acodec'))
+            destination = destination.with_suffix(staging_path.suffix)
             staging_path.replace(destination)
         finally:
             staging_path.unlink(missing_ok=True)
     return {'status': 'completed', 'source': 'YouTube', 'url': url,
             'filename': str(destination.relative_to(root)), 'durationSeconds': duration,
-            'codec': downloaded.get('acodec'), 'bitrate': downloaded.get('abr')}
+            'codec': downloaded.get('acodec'), 'bitrate': downloaded.get('abr'), 'tagging': tagging}
 
 
 def main(encoded, progress=None):
@@ -287,11 +295,11 @@ def main(encoded, progress=None):
             raise ValueError('Request too large')
         payload = json.loads(unquote(encoded))
         profile = payload.get('profileId', 'owner')
-        if profile not in ('owner', 'extra'):
+        if profile not in ('owner', 'extra', 'extra2'):
             raise ValueError('Invalid profile')
         root = Path(os.environ.get('DOWNLOADS_ROOT', '/downloads')).resolve()
-        if profile == 'extra':
-            target = root / 'profiles' / 'extra'
+        if profile != 'owner':
+            target = root / 'profiles' / profile
             if (root / 'profiles').is_symlink() or target.is_symlink():
                 raise ValueError('Invalid profile destination')
             root = target

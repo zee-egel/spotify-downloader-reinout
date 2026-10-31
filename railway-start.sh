@@ -37,7 +37,7 @@ elif (( share_cache_retention > 2147483647 )); then
 fi
 
 # Railway mounts its volume as root; both applications run as UID 1000.
-directories=("$(dirname "$STATE_FILE")" "$DOWNLOADS_ROOT" "$SLSKD_APP_DIR" "$SLSKD_INCOMPLETE_DIR" "$DOWNLOADS_ROOT/profiles" "$DOWNLOADS_ROOT/profiles/extra")
+directories=("$(dirname "$STATE_FILE")" "$DOWNLOADS_ROOT" "$SLSKD_APP_DIR" "$SLSKD_INCOMPLETE_DIR" "$DOWNLOADS_ROOT/profiles" "$DOWNLOADS_ROOT/profiles/extra" "$DOWNLOADS_ROOT/profiles/extra2")
 mkdir -p "${directories[@]}"
 chown slskd:slskd "${directories[@]}"
 
@@ -69,7 +69,7 @@ if [[ -n "${YOUTUBE_EXIT_NODE:-}" ]]; then
     export YOUTUBE_PROXY=socks5://127.0.0.1:1055
     echo 'YouTube proxy connected through the configured Tailscale exit node.'
 fi
-# Share completed audio from both profiles; keep staging files and non-audio out.
+# Share completed audio from all profiles; keep staging files and non-audio out.
 # CLI options ensure a persisted slskd.yml cannot silently disable this share.
 gosu slskd /slskd/slskd --app-dir "$SLSKD_APP_DIR" \
     --shared "[Music]$DOWNLOADS_ROOT" \

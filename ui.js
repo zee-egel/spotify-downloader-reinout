@@ -27,31 +27,31 @@ const bytes = (n) => {
   return (i ? n.toFixed(1) : Math.round(n)) + " " + u[i];
 };
 const labels = {
-  "youtube waiting": "Waiting for YouTube recovery",
-  "youtube searching": "Recovering on YouTube…",
-  "youtube checking": "Checking YouTube match…",
-  "youtube downloading": "Downloading from YouTube",
-  "youtube validating": "Checking audio…",
-  unavailable: "Unavailable",
-  pending: "Waiting to search",
-  searching: "Searching Soulseek…",
-  matching: "Queueing on Soulseek…",
-  "already/duplicate": "Already queued elsewhere",
-  completed: "Complete",
-  downloading: "Downloading",
-  "queued locally": "Queued",
-  "queued remotely": "Waiting for source",
-  failed: "Download failed",
-  unknown: "Awaiting status",
-  "search error": "Search failed",
-  "search timeout": "Search timed out",
-  no_match: "No match",
-  "no match": "No match",
-  review_required: "Needs review",
-  "needs review": "Needs review",
-  "trying another source": "Trying another source",
+  "youtube waiting": "Wachten op zoeken via YouTube",
+  "youtube searching": "Zoeken op YouTube…",
+  "youtube checking": "YouTube-resultaat controleren…",
+  "youtube downloading": "Downloaden via YouTube",
+  "youtube validating": "Audio controleren…",
+  unavailable: "Niet beschikbaar",
+  pending: "Wachten op zoeken",
+  searching: "Zoeken op Soulseek…",
+  matching: "In wachtrij zetten op Soulseek…",
+  "already/duplicate": "Staat al elders in de wachtrij",
+  completed: "Klaar",
+  downloading: "Bezig met downloaden",
+  "queued locally": "In de wachtrij",
+  "queued remotely": "Wachten op de bron",
+  failed: "Download mislukt",
+  unknown: "Wachten op status",
+  "search error": "Zoeken mislukt",
+  "search timeout": "Zoektijd verstreken",
+  no_match: "Geen resultaat",
+  "no match": "Geen resultaat",
+  review_required: "Controle nodig",
+  "needs review": "Controle nodig",
+  "trying another source": "Andere bron proberen",
 };
-const label = (s) => labels[s] || "Needs attention";
+const label = (s) => labels[s] || "Aandacht nodig";
 const badge = (s) => renderHTML("badge", {
   kind: s === "completed" ? "success" : s === "downloading" || s.startsWith("youtube ") ? "active" : /fail|error|timeout|no.?match|review|unavailable/.test(s) ? "failed" : "",
   label: esc(label(s)),
@@ -138,26 +138,26 @@ function transferMarkup(rows) {
     const run = byBatch.get(t.batchId),
       key = run ? run.submissionId || run.submitted || run.id : "other";
     if (!groups.has(key))
-      groups.set(key, { name: run?.name || "Other downloads", rows: [] });
+      groups.set(key, { name: run?.name || "Overige downloads", rows: [] });
     groups.get(key).rows.push(t);
   }
   return [...groups].map(([key, g]) => renderHTML("transfer-group", {
     key: esc(key), name: esc(g.name), count: g.rows.length,
-    unit: g.rows.length === 1 ? "file" : "files",
+    unit: g.rows.length === 1 ? "bestand" : "bestanden",
     rows: g.rows.map(t => renderHTML("transfer", {
       kind: t.kind === "completed" ? "completed" : "",
-      name: esc(t.name), source: esc(t.username || "Source unavailable"),
+      name: esc(t.name), source: esc(t.username || "Bron niet beschikbaar"),
       badge: badge(t.kind),
       progress: t.kind === "downloading" ? renderHTML("transfer-progress", {
         bar: t.size ? progress(t.percent, t.name) : "",
         bytes: bytes(t.done) + (t.size ? " / " + bytes(t.size) : "") + (t.speed ? " · " + bytes(t.speed) + "/s" : ""),
-        percent: t.size ? Math.round(t.percent) + "%" : "File size not reported",
+        percent: t.size ? Math.round(t.percent) + "%" : "Bestandsgrootte niet opgegeven",
       }) : "",
       key: esc(key + ":" + (t.id || t.batchId + ":" + t.username + ":" + t.name)),
-      sourceDetail: esc(t.username || "Unavailable"), folder: esc(t.folder),
-      size: t.size ? renderHTML("definition", { label: "File size", value: bytes(t.size) }) : "",
+      sourceDetail: esc(t.username || "Niet beschikbaar"), folder: esc(t.folder),
+      size: t.size ? renderHTML("definition", { label: "Bestandsgrootte", value: bytes(t.size) }) : "",
       state: esc(t.state),
-      error: t.error ? renderHTML("definition", { label: "Problem", value: esc(t.error) }) : "",
+      error: t.error ? renderHTML("definition", { label: "Probleem", value: esc(t.error) }) : "",
       failure: t.kind === "failed" ? renderHTML("transfer-failure") : "",
     })).join(""),
   })).join("");
@@ -214,18 +214,18 @@ function renderTransfers() {
         ? n +
             " " +
             {
-              downloading: "downloading",
-              "queued locally": "queued",
-              "queued remotely": "waiting for source",
-              failed: "failed",
-              completed: "complete",
+              downloading: "bezig met downloaden",
+              "queued locally": "in de wachtrij",
+              "queued remotely": "wachten op de bron",
+              failed: "mislukt",
+              completed: "klaar",
             }[k]
         : "";
     })
     .filter(Boolean);
   document.getElementById("queue-summary").textContent =
     counts.join(" · ") ||
-    (receivedSnapshot ? "No downloads yet." : "Connecting…");
+    (receivedSnapshot ? "Nog geen downloads." : "Verbinden…");
   document.getElementById("queue-notice").hidden = !snapshot.error;
   document.getElementById("queue-error").textContent = snapshot.error || "";
   replaceList(
@@ -233,14 +233,14 @@ function renderTransfers() {
     rows.length
       ? transferMarkup(rows.slice(0, transferLimit))
       : renderHTML("empty", { content: query || status
-          ? "No downloads match your filters. Even the deep cuts came up empty."
-          : snapshot.error ? "Downloads will appear when the connection is restored."
-          : !receivedSnapshot ? "Loading downloads…" : renderHTML("empty-transfers") }),
+          ? "Geen downloads gevonden met deze filters."
+          : snapshot.error ? "Downloads verschijnen zodra de verbinding is hersteld."
+          : !receivedSnapshot ? "Downloads laden…" : renderHTML("empty-transfers") }),
   );
   const more = document.getElementById("more-transfers");
   more.hidden = rows.length <= transferLimit;
   more.textContent =
-    "Show more (" + Math.max(0, rows.length - transferLimit) + " remaining)";
+    "Meer tonen (nog " + Math.max(0, rows.length - transferLimit) + ")";
 }
 function renderRuns() {
   replaceList(
@@ -272,30 +272,30 @@ function renderRuns() {
                   c[k] +
                   " " +
                   ({
-                    "already/duplicate": "already queued",
-                    "queued locally": "queued",
-                    "queued remotely": "waiting for source",
-                  }[k] || k),
+                    "already/duplicate": "al in de wachtrij",
+                    "queued locally": "in de wachtrij",
+                    "queued remotely": "wachten op de bron",
+                  }[k] || label(k)),
               );
             const status = finished
               ? total && complete >= total
-                ? "All songs downloaded"
+                ? "Alle nummers gedownload"
                 : complete
-                  ? "Finished · partial success"
-                  : "Finished · no songs downloaded"
+                  ? "Afgerond · deels gelukt"
+                  : "Afgerond · geen nummers gedownload"
               : r.phase === "final"
-                ? "Finished"
+                ? "Afgerond"
                 : r.phase === "unconfirmed"
-                  ? "Awaiting confirmation"
+                  ? "Wachten op bevestiging"
                   : ["submitted", "submitting", "resolving"].includes(r.phase)
-                    ? "Resolving…"
+                    ? "Playlist uitlezen…"
                     : r.phase === "queued"
-                      ? "Queued"
-                      : "In progress";
+                      ? "In de wachtrij"
+                      : "Bezig";
             const date = new Date(r.submitted),
               when = Number.isNaN(date.getTime())
                 ? ""
-                : date.toLocaleString(undefined, {
+                : date.toLocaleString("nl-NL", {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",
@@ -305,11 +305,11 @@ function renderRuns() {
             const trackRows = r.tracks.slice(0, limit).map((t, j) => renderHTML("track", {
               key: esc(key + ":row:" + (t.spotifyId || j)), number: j + 1,
               sourceIcon: sourceIcon(t.downloadSource), title: esc(t.title),
-              displayTitle: esc(t.title || "Untitled track"), artist: esc(t.artist),
+              displayTitle: esc(t.title || "Nummer zonder titel"), artist: esc(t.artist),
               reason: t.reason ? renderHTML("track-reason", { reason: esc(t.reason) }) : "",
               source: t.source ? renderHTML("track-source", {
                 key: esc(key + ":track:" + j), source: esc(t.source),
-                fallback: t.fallback ? " · Alternative source" : "",
+                fallback: t.fallback ? " · Alternatieve bron" : "",
               }) : "",
               badge: badge(t.status),
               percent: (t.status === "downloading" || t.status === "youtube downloading") && t.percent != null
@@ -323,27 +323,26 @@ function renderRuns() {
             const unavailable = c.unavailable || 0;
             const activity = finished
               ? complete
-                ? "Your music is ready"
-                : "This import has finished"
+                ? "Je muziek staat klaar"
+                : "Deze import is afgerond"
               : active
                 ? label(active.status)
                 : r.phase === "unconfirmed"
-                  ? "Submission could not be confirmed"
+                  ? "Import kon niet worden bevestigd"
                   : ["submitted", "submitting", "resolving"].includes(r.phase)
-                    ? "Reading your playlist"
+                    ? "Je playlist uitlezen"
                     : r.tracks.some((t) => t.status.includes("queued"))
-                      ? "Waiting for a source"
-                      : "Waiting for the next workflow update";
+                      ? "Wachten op een bron"
+                      : "Wachten op de volgende workflow-update";
             const description = finished
               ? complete +
-                " song" +
-                (complete === 1 ? " is" : "s are") +
-                " downloaded." +
+                (complete === 1 ? " nummer is" : " nummers zijn") +
+                " gedownload." +
                 (unavailable
-                  ? " " + unavailable + " unavailable after recovery."
+                  ? " " + unavailable + " niet beschikbaar na opnieuw zoeken."
                   : "") +
                 (c["already/duplicate"]
-                  ? " Some tracks were already queued elsewhere."
+                  ? " Sommige nummers stonden al elders in de wachtrij."
                   : "")
               : active
                 ? [active.artist, active.title].filter(Boolean).join(" — ") +
@@ -351,25 +350,25 @@ function renderRuns() {
                     ? " · " + Math.round(active.percent) + "%"
                     : "")
                 : r.phase === "unconfirmed"
-                  ? "Check this import for updates before submitting again."
+                  ? "Controleer deze import op updates voordat je hem opnieuw indient."
                   : ["submitted", "submitting", "resolving"].includes(r.phase)
-                    ? "Track details appear as they arrive. Songs are searched one at a time."
+                    ? "Nummergegevens verschijnen zodra ze binnen zijn. Nummers worden één voor één gezocht."
                     : r.tracks.some((t) => t.status.includes("queued"))
-                      ? "The source has not started sending these files. Available songs are already in your library. Peer pressure has its limits."
-                      : "Progress appears when the download service reports a change.";
+                      ? "De bron verstuurt deze bestanden nog niet. Beschikbare nummers staan al in je bibliotheek."
+                      : "De voortgang verschijnt zodra de downloaddienst een wijziging doorgeeft.";
             return renderHTML("run", {
-              key: esc(key), name: esc(r.name || "Spotify playlist"), when: esc(when),
-              totalLabel: total != null ? " · " + total + " tracks" : "",
+              key: esc(key), name: esc(r.name || "Spotify-playlist"), when: esc(when),
+              totalLabel: total != null ? " · " + total + (total === 1 ? " nummer" : " nummers") : "",
               kind: finished ? (complete ? "success" : "failed") : "active",
               status, handled, complete, unavailable,
               progress: total ? renderHTML("run-progress", {
-                handled, total, bar: progress((handled / total) * 100, "Tracks handled", finished),
+                handled, total, bar: progress((handled / total) * 100, "Nummers afgehandeld", finished),
               }) : "",
               activity: esc(activity), description: esc(description),
               counts: counts.length && !finished ? renderHTML("run-counts", { counts: esc(counts.join(" · ")) }) : "",
-              libraryLabel: complete ? "Get downloaded music" : "Open library",
+              libraryLabel: complete ? "Gedownloade muziek ophalen" : "Bibliotheek openen",
               open: !finished && i === 0,
-              trackCount: total != null ? total + " " : "",
+              trackCount: total != null ? total : r.tracks.length,
               tracks: trackRows || renderHTML("empty-tracks"),
               more: r.tracks.length > limit ? renderHTML("more-tracks", { key: esc(key) }) : "",
               playlistId: encodeURIComponent(r.id),
@@ -391,7 +390,7 @@ function route() {
     else link.removeAttribute("aria-current");
   }
   document.title =
-    { files: "Library", transfers: "Downloads", start: "Import" }[view] +
+    { files: "Bibliotheek", transfers: "Downloads", start: "Importeren" }[view] +
     " · The Disc Situation";
 }
 runList.addEventListener("click", (e) => {
@@ -429,7 +428,7 @@ for (const control of [controls.search, controls.status, controls.sort])
 controls.reverse.addEventListener("click", () => {
   const reverse = controls.reverse.dataset.reverse !== "true";
   controls.reverse.dataset.reverse = String(reverse);
-  controls.reverse.textContent = reverse ? "Reversed" : "Reverse order";
+  controls.reverse.textContent = reverse ? "Volgorde herstellen" : "Volgorde omkeren";
   controls.reverse.setAttribute("aria-pressed", String(reverse));
   renderTransfers();
 });
@@ -472,7 +471,7 @@ function renderLibrary() {
   const more = document.getElementById("more-library-transfers");
   more.hidden = rows.length <= libraryLimit;
   more.textContent =
-    "Show more (" + Math.max(0, rows.length - libraryLimit) + " remaining)";
+    "Meer tonen (nog " + Math.max(0, rows.length - libraryLimit) + ")";
 }
 librarySearch.addEventListener("input", () => {
   libraryLimit = 100;
@@ -530,21 +529,21 @@ form.addEventListener("submit", async (e) => {
   if (submit.disabled) return;
   if (!validPlaylist(input.value.trim())) {
     input.setCustomValidity(
-      "Paste a Spotify playlist link. Album and track links are not supported.",
+      "Plak een Spotify-playlistlink. Links naar albums en losse nummers worden niet ondersteund.",
     );
     feedback.className = "error";
     feedback.textContent =
-      "Use a Spotify playlist link or URI. Album and track links are not supported.";
+      "Gebruik een Spotify-playlistlink of -URI. Links naar albums en losse nummers worden niet ondersteund.";
     input.focus();
     input.reportValidity();
     input.setAttribute("aria-invalid", "true");
     return;
   }
   submit.disabled = true;
-  submit.textContent = "Importing…";
+  submit.textContent = "Importeren…";
   form.setAttribute("aria-busy", "true");
   feedback.className = "hint";
-  feedback.textContent = "Sending playlist…";
+  feedback.textContent = "Playlist versturen…";
   try {
     const response = await fetch("/submit", {
       method: "POST",
@@ -557,27 +556,27 @@ form.addEventListener("submit", async (e) => {
       );
       throw Error(
         doc.querySelector(".error")?.textContent ||
-          "The playlist could not be imported. Try again.",
+          "De playlist kon niet worden geïmporteerd. Probeer het opnieuw.",
       );
     }
     feedback.textContent =
-      "Playlist submitted. The crate digging has begun. Follow the tracks in your imports below.";
+      "Playlist ingediend. Volg de nummers hieronder bij je imports.";
     input.value = "";
   } catch (error) {
     feedback.className = "error";
     feedback.textContent =
       error instanceof TypeError
-        ? "Connection lost. Check recent imports before submitting again."
+        ? "Verbinding verbroken. Controleer je recente imports voordat je de playlist opnieuw indient."
         : error.message;
   } finally {
     submit.disabled = false;
-    submit.textContent = "Import playlist";
+    submit.textContent = "Importeren";
     form.removeAttribute("aria-busy");
   }
 });
 let stream;
 function connect() {
-  document.getElementById("live-status").textContent = "Connecting…";
+  document.getElementById("live-status").textContent = "Verbinden…";
   stream?.close();
   stream = new EventSource("/events" + (location.search || ""));
   stream.onmessage = (e) => {
@@ -585,19 +584,19 @@ function connect() {
       snapshot = JSON.parse(e.data);
       receivedSnapshot = true;
       document.getElementById("live-status").innerHTML = renderHTML("connection", {
-        kind: snapshot.error ? "offline" : "", label: snapshot.error ? "Source offline" : "Connected",
+        kind: snapshot.error ? "offline" : "", label: snapshot.error ? "Bron offline" : "Verbonden",
       });
       renderTransfers();
       renderRuns();
       renderLibrary();
     } catch {
       document.getElementById("live-status").textContent =
-        "Could not read update";
+        "Update kon niet worden gelezen";
     }
   };
   stream.onerror = () => {
     document.getElementById("live-status").innerHTML =
-      renderHTML("connection", { kind: "offline", label: "Reconnecting…" });
+      renderHTML("connection", { kind: "offline", label: "Opnieuw verbinden…" });
   };
 }
 document.getElementById("reconnect").addEventListener("click", connect);

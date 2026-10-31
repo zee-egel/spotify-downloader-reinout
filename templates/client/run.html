@@ -16,15 +16,15 @@
   <div class="run-stats">
     <div>
       <strong>${handled}</strong>
-      <span>tracks handled</span>
+      <span>afgehandeld</span>
     </div>
     <div>
       <strong>${complete}</strong>
-      <span>songs downloaded</span>
+      <span>gedownload</span>
     </div>
     <div>
       <strong>${unavailable}</strong>
-      <span>unavailable</span>
+      <span>niet beschikbaar</span>
     </div>
   </div>
   ${progress}
@@ -36,13 +36,13 @@
     ${counts}
     <div class="run-actions">
       <a class="link" href="#files">${libraryLabel}</a>
-      <a class="link" href="#transfers">Monitor transfers</a>
+      <a class="link" href="#transfers">Downloads volgen</a>
     </div>
     <details data-key="${key}" open="${open}">
-      <summary>View ${trackCount}tracks</summary>
+      <summary>Nummers bekijken (${trackCount})</summary>
       <div class="track-list">${tracks}</div>
       ${more}
-      <a class="link" href="https://open.spotify.com/playlist/${playlistId}" target="_blank" rel="noopener noreferrer">Open in Spotify (new tab)</a>
+      <a class="link" href="https://open.spotify.com/playlist/${playlistId}" target="_blank" rel="noopener noreferrer">Openen in Spotify (nieuw tabblad)</a>
     </details>
   </div>
 </article>
