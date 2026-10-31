@@ -129,7 +129,7 @@ function replaceList(node, markup) {
   }
   node.scrollTop = scroll;
 }
-function transferMarkup(rows) {
+function transferMarkup(rows, collapseOther = false) {
   const byBatch = new Map();
   for (const run of snapshot.runs)
     for (const t of run.tracks) if (t.batchId) byBatch.set(t.batchId, run);
@@ -141,8 +141,9 @@ function transferMarkup(rows) {
       groups.set(key, { name: run?.name || "Overige downloads", rows: [] });
     groups.get(key).rows.push(t);
   }
-  return [...groups].map(([key, g]) => renderHTML("transfer-group", {
+  return [...groups].sort(([a], [b]) => (a === "other") - (b === "other")).map(([key, g]) => renderHTML("transfer-group", {
     key: esc(key), name: esc(g.name), count: g.rows.length,
+    open: !collapseOther || key !== "other" || groups.size === 1,
     unit: g.rows.length === 1 ? "bestand" : "bestanden",
     rows: g.rows.map(t => renderHTML("transfer", {
       kind: t.kind === "completed" ? "completed" : "",
@@ -187,7 +188,10 @@ function renderTransfers() {
     unknown: 4,
     completed: 5,
   };
+  const imported = new Set(snapshot.runs.flatMap(r => r.tracks.map(t => t.batchId).filter(Boolean)));
   rows.sort((a, b) => {
+    const group = Number(imported.has(b.batchId)) - Number(imported.has(a.batchId));
+    if (group) return group;
     let x =
       sort === "status"
         ? (order[a.kind] ?? 9) - (order[b.kind] ?? 9)
@@ -231,7 +235,7 @@ function renderTransfers() {
   replaceList(
     transferList,
     rows.length
-      ? transferMarkup(rows.slice(0, transferLimit))
+      ? transferMarkup(rows.slice(0, transferLimit), true)
       : renderHTML("empty", { content: query || status
           ? "Geen downloads gevonden met deze filters."
           : snapshot.error ? "Downloads verschijnen zodra de verbinding is hersteld."
@@ -371,7 +375,7 @@ function renderRuns() {
               trackCount: total != null ? total : r.tracks.length,
               tracks: trackRows || renderHTML("empty-tracks"),
               more: r.tracks.length > limit ? renderHTML("more-tracks", { key: esc(key) }) : "",
-              playlistId: encodeURIComponent(r.id),
+              sourceUrl: esc(r.url || `https://open.spotify.com/${r.kind || "playlist"}/${encodeURIComponent(r.id)}`),
             });
           })
           .join("")

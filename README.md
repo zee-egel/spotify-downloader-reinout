@@ -1,5 +1,9 @@
 # Playlist desk
 
+The import field accepts Spotify `/track`, `/album`, and `/playlist` links (and their matching Spotify URIs), individual YouTube videos, and SoundCloud tracks. Spotify imports use the linked Spotify account and the n8n workflow. Direct YouTube and SoundCloud links use yt-dlp in the dashboard container and save the best available audio without transcoding. The Docker images include yt-dlp; a local Python run needs `yt-dlp[default]` and FFmpeg installed separately.
+
+To enable Spotify tracks and albums on an existing n8n installation, apply `workflow_profiles.py` to a fresh export of the live workflow and publish the result after deploying the dashboard. The updated workflow reads the submitted Spotify ID and track list. A previously patched workflow must also be exported and patched again.
+
 ## Railway: dashboard and slskd together
 
 `railway.json` selects `Dockerfile.railway`, which runs the dashboard and slskd 0.26.0 in one service. Both run as UID 1000 and use the same downloads directory. The original `Dockerfile` and Pi Compose deployment remain available. The Railway image also includes yt-dlp, Node 22, and ffprobe for YouTube fallback.

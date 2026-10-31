@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -28,15 +29,74 @@ STATE_LOCK = threading.Lock()
 YOUTUBE_LOCK = threading.Lock()
 
 
-def playlist_id(value):
+def spotify_link(value):
     value = value.strip()
-    match = re.fullmatch(r'spotify:playlist:([A-Za-z0-9]{22})', value)
+    match = re.fullmatch(r'spotify:(track|album|playlist):([A-Za-z0-9]{22})', value)
     if not match:
         parsed = urllib.parse.urlparse(value)
-        if parsed.scheme != 'https' or parsed.hostname not in ('open.spotify.com', 'play.spotify.com'):
+        if parsed.scheme != 'https' or parsed.hostname not in ('open.spotify.com', 'play.spotify.com') or parsed.username or parsed.password or parsed.port not in (None, 443):
             return None
-        match = re.fullmatch(r'/playlist/([A-Za-z0-9]{22})/?', parsed.path)
-    return match.group(1) if match else None
+        match = re.fullmatch(r'/(?:intl-[a-z]{2}/)?(track|album|playlist)/([A-Za-z0-9]{22})/?', parsed.path)
+    return match.groups() if match else None
+
+
+def playlist_id(value):
+    link = spotify_link(value)
+    return link[1] if link and link[0] == 'playlist' else None
+
+
+def direct_source(value):
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port not in (None, 443):
+        return None
+    host = (parsed.hostname or '').lower()
+    if host in ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'):
+        if parsed.path == '/watch' and re.fullmatch(r'[A-Za-z0-9_-]{11}', urllib.parse.parse_qs(parsed.query).get('v', [''])[0]):
+            return 'youtube'
+        if re.fullmatch(r'/(shorts|live)/[A-Za-z0-9_-]{11}/?', parsed.path):
+            return 'youtube'
+    if host == 'youtu.be' and re.fullmatch(r'/[A-Za-z0-9_-]{11}/?', parsed.path):
+        return 'youtube'
+    if host in ('soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com') and re.fullmatch(r'/[^/]+/[^/]+/?', parsed.path):
+        return 'soundcloud'
+    if host == 'on.soundcloud.com' and re.fullmatch(r'/[A-Za-z0-9]+/?', parsed.path):
+        return 'soundcloud'
+    return None
+
+
+def download_direct(submission_id, url, source, owner):
+    root = ROOT if owner == 'owner' else ROOT / 'profiles' / owner
+    folder = root / ('YouTube' if source == 'youtube' else 'SoundCloud')
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=folder, prefix='.download-') as temporary:
+            command = [os.sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
+                       '--no-simulate', '--no-overwrites', '-f', 'bestaudio',
+                       '-o', str(Path(temporary) / '%(title).140B [%(id)s].%(ext)s')]
+            if source == 'youtube' and os.environ.get('YOUTUBE_PROXY'):
+                command += ['--proxy', os.environ['YOUTUBE_PROXY']]
+            result = subprocess.run(command + [url], capture_output=True, text=True, timeout=1200)
+            files = [path for path in Path(temporary).iterdir() if path.is_file() and not path.name.endswith(('.part', '.ytdl'))]
+            if result.returncode or len(files) != 1:
+                raise ValueError((result.stderr or result.stdout).strip().splitlines()[-1][-300:] if (result.stderr or result.stdout).strip() else 'Geen audiobestand ontvangen')
+            target = folder / files[0].name
+            try:
+                os.link(files[0], target)
+            except FileExistsError:
+                raise ValueError('Dit bestand bestaat al in de bibliotheek') from None
+        status, reason, title = 'completed', '', target.stem
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        status, reason, title = 'failed', str(error)[:300], url
+    with STATE_LOCK:
+        runs = read_runs()
+        for run in runs:
+            if run.get('submissionId') == submission_id:
+                run['status'] = status
+                run['workflow']['phase'] = 'final'
+                run['workflow']['tracks'][0].update(status=status, reason=reason, title=title)
+                run['name'] = title if status == 'completed' else run['name']
+                break
+        save_runs(runs)
 
 
 def inside(relative, root=None):
@@ -258,8 +318,8 @@ def run_view(run, transfers):
             'spotifyId': track.get('spotifyId') or '', 'artist': track.get('artist') or '', 'title': track.get('title') or '',
             'status': status, 'reason': (((track.get('youtubeResult') or {}).get('reason') or track.get('reason')) if track.get('youtubeAttempted') else '') or youtube.get('reason') or (track.get('youtubeResult') or {}).get('reason') or track.get('reason') or '',
             'fallback': bool(track.get('fallbackAttempted') or youtube),
-            'downloadSource': ('youtube' if youtube or track.get('youtubeStatus') == 'completed' or (track.get('fallbackSource') == 'YouTube' and not batch) else 'soulseek' if batch or track.get('username') else '') if status == 'completed' else '',
-            'source': 'YouTube' if youtube else track.get('fallbackSource') if track.get('fallbackAttempted') else next((f['username'] for f in files), track.get('username') or ''),
+            'downloadSource': (run.get('source') or ('youtube' if youtube or track.get('youtubeStatus') == 'completed' or (track.get('fallbackSource') == 'YouTube' and not batch) else 'soulseek' if batch or track.get('username') else '')) if status == 'completed' else '',
+            'source': ('SoundCloud' if run.get('source') == 'soundcloud' else 'YouTube') if run.get('source') else 'YouTube' if youtube else track.get('fallbackSource') if track.get('fallbackAttempted') else next((f['username'] for f in files), track.get('username') or ''),
             'percent': youtube.get('percent') if youtube else max((file['percent'] for file in files), default=0)})
     counts = {kind: sum(track['status'] == kind for track in tracks) for kind in ('completed', 'downloading', 'queued locally', 'queued remotely', 'failed', 'search timeout', 'search error', 'unknown', 'unavailable', 'already/duplicate')}
     counts['fallback'] = sum(track['fallback'] for track in tracks)
@@ -268,7 +328,7 @@ def run_view(run, transfers):
     handled = sum(track['status'] in ('completed', 'unavailable', 'already/duplicate') for track in tracks)
     total = state.get('totalSpotifyTracks')
     finished = state.get('phase') == 'final' or bool(total and handled >= total and not state.get('resolving'))
-    return {'handled': total if finished and total is not None else handled, 'finished': finished, 'id': run.get('id'), 'submissionId': run.get('submissionId'), 'name': state.get('playlistName') or run.get('name'), 'submitted': run.get('submitted'),
+    return {'handled': total if finished and total is not None else handled, 'finished': finished, 'id': run.get('id'), 'url': run.get('url'), 'kind': run.get('kind', 'playlist'), 'submissionId': run.get('submissionId'), 'name': state.get('playlistName') or run.get('name'), 'submitted': run.get('submitted'),
         'phase': 'resolving' if state.get('resolving') else state.get('phase') or run.get('status') or 'submitted', 'total': state.get('totalSpotifyTracks'),
         'counts': counts, 'tracks': tracks}
 
@@ -550,9 +610,23 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             url = form.get('url', [''])[0].strip()
-            ident = playlist_id(url)
-            if not ident:
-                raise ValueError('Vul een Spotify-playlistlink of -URI in')
+            link = spotify_link(url)
+            source = direct_source(url) if not link else None
+            if not link and not source:
+                raise ValueError('Vul een Spotify-track, -album of -playlist, YouTube-video of SoundCloud-tracklink in')
+            submission_id = uuid.uuid4().hex
+            if source:
+                with STATE_LOCK:
+                    runs = read_runs()
+                    runs.insert(0, {'id': submission_id, 'submissionId': submission_id, 'name': url,
+                        'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'downloading',
+                        'owner': self.user, 'source': source, 'workflow': {'phase': 'progress', 'totalSpotifyTracks': 1,
+                        'tracks': [{'title': url, 'artist': '', 'status': 'downloading'}]}})
+                    save_runs(runs)
+                threading.Thread(target=download_direct, args=(submission_id, url, source, self.user), daemon=True).start()
+                self.redirect('/')
+                return
+            kind, ident = link
             webhook = os.environ.get('N8N_WEBHOOK_URL', '')
             if not webhook:
                 raise ValueError('De downloaddienst is nog niet ingesteld.')
@@ -561,9 +635,8 @@ class Handler(BaseHTTPRequestHandler):
                 headers['X-Webhook-Token'] = os.environ['N8N_WEBHOOK_TOKEN']
                 headers['X-Playlist-Token'] = os.environ['N8N_WEBHOOK_TOKEN']
             playlist, items = None, None
-            if os.environ.get('SPOTIFY_CLIENT_ID') or self.user != 'owner':
-                playlist, items = profiles.spotify_playlist(self.user, ident)
-            submission_id = uuid.uuid4().hex
+            if os.environ.get('SPOTIFY_CLIENT_ID') or self.user != 'owner' or kind != 'playlist':
+                playlist, items = profiles.spotify_selection(self.user, kind, ident)
             with STATE_LOCK:
                 runs = read_runs()
                 # ponytail: one app replica and a five-minute callback lease; use a durable queue for multiple replicas.
@@ -573,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
                     and time.time() - datetime.fromisoformat(run.get('updated') or run['submitted']).timestamp() < 300
                     for run in runs):
                     raise ValueError('Er wordt al een andere playlist uitgelezen. Probeer het opnieuw zodra die in de wachtrij staat.')
-                runs.insert(0, {'id': ident, 'submissionId': submission_id, 'name': 'Spotify-playlist ' + ident, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitting', 'owner': self.user, 'spotifyMetadata': spotify_metadata(items)})
+                runs.insert(0, {'id': ident, 'kind': kind, 'submissionId': submission_id, 'name': 'Spotify-' + kind + ' ' + ident, 'url': url, 'submitted': datetime.now(timezone.utc).isoformat(), 'status': 'submitting', 'owner': self.user, 'spotifyMetadata': spotify_metadata(items)})
                 save_runs(runs)
             req = urllib.request.Request(webhook, json.dumps({'url': url, 'playlistId': ident, 'submissionId': submission_id, 'profileId': self.user, 'downloadDirectory': '' if self.user == 'owner' else 'profiles/' + self.user, 'playlist': playlist, 'playlistItems': items}).encode(), headers)
             try:
@@ -592,7 +665,7 @@ class Handler(BaseHTTPRequestHandler):
                                 run['status'] = 'unconfirmed'
                     save_runs(runs)
                 raise
-            name = (playlist or {}).get('name') or playlist_name(ident) or 'Spotify-playlist ' + ident
+            name = (playlist or {}).get('name') or (playlist_name(ident) if kind == 'playlist' else None) or 'Spotify-' + kind + ' ' + ident
             with STATE_LOCK:
                 runs = read_runs()
                 for run in runs:

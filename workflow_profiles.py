@@ -4,7 +4,6 @@ import json
 import sys
 from pathlib import Path
 
-
 def patch(workflow):
     workflow = copy.deepcopy(workflow)
     nodes = {node['name']: node for node in workflow['nodes']}
@@ -22,6 +21,10 @@ def patch(workflow):
             "if (body.downloadDirectory !== expected) throw new Error('Invalid profile destination');\n"
             f"if (!body.{value}) throw new Error('Connect Spotify in Playlist desk before importing');\n"
             f"return [{{ json: body.{value} }}];"}
+    nodes['Code in JavaScript1']['parameters']['jsCode'] = (
+        "const body = $('Playlist desk webhook').first().json.body;\n"
+        "if (!/^[A-Za-z0-9]{22}$/.test(body.playlistId)) throw new Error('Invalid Spotify ID');\n"
+        "return [{json:{playlistId:body.playlistId}}];")
     for name in ('Queue Download', 'Queue Fallback'):
         params = nodes[name]['parameters']
         previous = 'destination: $json.playlistName'

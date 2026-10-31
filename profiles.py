@@ -141,6 +141,25 @@ def spotify_playlist(user, ident):
     return {'id': ident, 'name': playlist.get('name', 'Spotify-playlist')}, {'items': items, 'next': None}
 
 
+def spotify_selection(user, kind, ident):
+    if kind == 'playlist':
+        return spotify_playlist(user, ident)
+    if kind == 'track':
+        track = spotify_get(user, '/v1/tracks/' + ident)
+        name = track.get('name') or 'Spotify-track'
+        return {'id': ident, 'name': name}, {'items': [{'item': track}], 'next': None}
+    album = spotify_get(user, '/v1/albums/' + ident)
+    album_info = {key: album.get(key) for key in ('name', 'artists', 'release_date', 'images')}
+    items = []
+    page = album.get('tracks') or {}
+    while True:
+        items.extend({'item': {**track, 'album': album_info}} for track in page.get('items', []))
+        if not page.get('next'):
+            break
+        page = spotify_get(user, f"/v1/albums/{ident}/tracks?limit=50&offset={len(items)}")
+    return {'id': ident, 'name': album.get('name', 'Spotify-album')}, {'items': items, 'next': None}
+
+
 def telegram(user, method, payload=None):
     settings = load(user).get('telegram') or {}
     token = settings.get('token', '')
